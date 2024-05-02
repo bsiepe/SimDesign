@@ -1,6 +1,6 @@
 # Helpers -----------------------------------------------------------------
 mcse_prop <- function(x, n_rep){
-    sqrt((1/n_rep) * (x * (1 - x)))
+    sqrt(x * (1 - x) /n_rep)
 }
 
 mcse_gen <- function(empirical_var, n_rep){
@@ -54,8 +54,10 @@ bias <- function(estimate, parameter = NULL, type = 'bias', abs = FALSE,
     }
     if(mcse){
         if(is.null(names(ret))) stop('Please provide named estimates as input')
+        emp_sd <- colSDs(estimate)
+        nsim <- nrow(estimate)
         if(type == 'relative'){
-            # TODO
+            ret <- emp_sd / sqrt(nsim) / abs(parameter)
         }
         else if(type == 'abs_relative'){
             # TODO
@@ -64,7 +66,10 @@ bias <- function(estimate, parameter = NULL, type = 'bias', abs = FALSE,
             # TODO
         }
         else {  # "normal" bias
-            ...
+            ret <- emp_sd / sqrt(nsim)
+        }
+        if(percent){
+            ret <- ret * 100
         }
     }
     if(unname) ret <- unname(ret)
