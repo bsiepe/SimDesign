@@ -1,6 +1,6 @@
 #' Robbins-Monro (1951) stochastic root-finding algorithm
 #'
-#' Function performs stochastic root solving for the provided \code{f(x)}
+#' Performs stochastic root solving for the provided \code{f(x)}
 #' using the Robbins-Monro (1951) algorithm. Differs from deterministic
 #' cousins such as \code{\link{uniroot}} in that \code{f} may contain stochastic error
 #' components, where the root is obtained through the running average method
@@ -109,7 +109,7 @@
 RobbinsMonro <- function(f, p, ...,
                          Polyak_Juditsky = FALSE,
                          maxiter = 500L, miniter = 100L, k = 3L,
-                         tol = .00001, verbose = TRUE,
+                         tol = .00001, verbose = interactive(),
                          fn.a = function(iter, a = 1, b = 1/2, c = 0, ...)
                              a / (iter + c)^b)
 {
@@ -136,6 +136,7 @@ RobbinsMonro <- function(f, p, ...,
             else
                 cat(sprintf("\rIter: %i; Max change in p = %.3f",
                             i, change))
+            utils::flush.console()
         }
         if(i > miniter && all(change < tol)){
             k.succ <- k.succ + 1L
@@ -153,8 +154,7 @@ RobbinsMonro <- function(f, p, ...,
 }
 
 PK_average <- function(history){
-    t <- sum(rowSums(!is.na(history)) > 0L)
-    ret <- colSums(history[1:(t - 1L), , drop=FALSE], na.rm=TRUE) / t
+    ret <- colMeans(history, na.rm=TRUE)
     matrix(ret, ncol=ncol(history))
 }
 

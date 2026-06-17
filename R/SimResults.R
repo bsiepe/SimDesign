@@ -1,15 +1,20 @@
-#' Function to read in saved simulation results
+#' Read in saved simulation results
 #'
 #' If \code{\link{runSimulation}} was passed the flag \code{save_results = TRUE} then the
 #' row results corresponding to the \code{design} object will be stored to a suitable
-#' sub-directory as individual \code{.rds} files. While users could use \code{\link{readRDS}} directly
+#' sub-directory as individual \code{.rds} or \code{qs2} files.
+#' While users could use \code{\link{readRDS}} and \code{qs2} directly
 #' to read these files in themselves, this convenience function will read the desired rows in
 #' automatically given the returned object
-#' from the simulation. Can be used to read in 1 or more \code{.rds} files at once (if more than 1 file
+#' from the simulation. Can be used to read in 1 or more files at once (if more than 1 file
 #' is read in then the result will be stored in a list).
 #'
-#' @param results object returned from \code{\link{runSimulation}} where \code{save_results = TRUE}
-#'   was used
+#' @param obj object returned from \code{\link{runSimulation}} where \code{save_results = TRUE}
+#'   or \code{store_results} was used. If the former then the remaining function arguments can
+#'   be useful for reading in specific files.
+#'
+#'   Alternatively, the object can be from the \code{Spower} package, evaluated
+#'   using either \code{Spower()} or \code{SpowerBatch()}
 #'
 #' @param which a numeric vector indicating which rows should be read in. If missing, all rows will be
 #'   read in
@@ -17,6 +22,10 @@
 #' @param prefix character indicating prefix used for stored files
 #'
 #' @param wd working directory; default is found with \code{\link{getwd}}.
+#'
+#' @param rbind logical; should the results be combined by row or returned as
+#'   a list? Only applicable when the supplied \code{obj} was obtained from the
+#'   function \code{Spower::SpowerBatch()}
 #'
 #' @export
 #'
@@ -48,27 +57,43 @@
 #'
 #' @author Phil Chalmers \email{rphilip.chalmers@@gmail.com}
 #'
+#' @seealso \code{\link{descript}}, \code{\link{SimRead}}
+#'
 #' @examples
 #'
 #' \dontrun{
 #'
-#' results <- runSimulation(..., save_results = TRUE)
+#' # store results (default behaviour)
+#' sim <- runSimulation(..., store_results = TRUE)
+#' SimResults(sim)
+#'
+#' # store results to drive if RAM issues are present
+#' obj <- runSimulation(..., save_results = TRUE)
 #'
 #' # row 1 results
-#' row1 <- SimResults(results, 1)
+#' row1 <- SimResults(obj, 1)
 #'
 #' # rows 1:5, stored in a named list
-#' rows_1to5 <- SimResults(results, 1:5)
+#' rows_1to5 <- SimResults(obj, 1:5)
 #'
 #' # all results
-#' rows_all <- SimResults(results)
+#' rows_all <- SimResults(obj)
 #'
 #' }
-SimResults <- function(results, which, prefix = "results-row", wd = getwd()){
-    stopifnot(!missing(results))
+SimResults <- function(obj, which, prefix = "results-row", wd = getwd(),
+                       rbind = FALSE){
+    stopifnot(!missing(obj))
+    if(is(obj, 'SpowerBatch')){
+        out <- lapply(obj, \(x) SimResults(x, which=which))
+        if(rbind)
+            out <- do.call(base::rbind, out)
+        return(out)
+    }
+    results <- SimExtract(obj, what='results')
+    if(!is.null(results)) return(results)
     wdold <- getwd()
     on.exit(setwd(wdold))
-    so <- summary(results)
+    so <- summary(obj)
     if(missing(which)) which <- 1L:so$number_of_conditions
     path <- so$save_info["save_results_dirname"]
     if(is.na(path))
@@ -78,11 +103,20 @@ SimResults <- function(results, which, prefix = "results-row", wd = getwd()){
     file_nums <- gsub(paste0(prefix, '-'), '', file_nums)
     file_nums <- as.numeric(gsub('.rds', '', file_nums))
     files <- data.frame(file_nums, files, stringsAsFactors = FALSE)
-    ret <- vector('list', length(which))
+    stored_Results_list <- vector('list', length(which))
     for(i in seq_len(length(which))){
-        pick <- which(files$file_num == which[i])
-        ret[[i]] <- readRDS(files$files[pick])
+        pick <- which(files$file_nums == which[i])
+        stored_Results_list[[i]] <- SimRead(files$files[pick])
     }
-    if(length(which) == 1L) ret <- ret[[1]]
-    ret
+    design <- SimExtract(obj, 'design')
+    if(is(stored_Results_list[[1L]]$results, 'data.frame') ||
+       is(stored_Results_list[[1L]]$results, 'matrix')){
+        for(i in seq_len(length(stored_Results_list)))
+            stored_Results_list[[i]] <- cbind(design[i,],
+                                              stored_Results_list[[i]]$results, row.names=NULL)
+        stored_Results_list <- dplyr::bind_rows(stored_Results_list)
+        stored_Results_list$ID <- NULL
+        stored_Results_list <- dplyr::as_tibble(stored_Results_list)
+    }
+    stored_Results_list
 }

@@ -4,7 +4,7 @@
 #' for \code{SimDesign} to run simulations. Templated output comes complete with the correct inputs,
 #' class of outputs, and optional comments to help with the initial definitions.
 #' Use this at the start of your Monte Carlo simulation study. Following
-#' the definition of the \code{SimDesign} template file please refer to detailed the information
+#' the definition of the \code{SimDesign} template file please refer to the detailed the information
 #' in \code{\link{runSimulation}} for how to edit this template to make a working simulation study.
 #'
 #' The recommended approach to organizing Monte Carlo simulation files is to first save the template generated
@@ -27,12 +27,12 @@
 #' @param save_structure character indicating the number of files to break the simulation code into
 #'   when \code{filename} is included (default is 'single' for one file). When \code{save_structure = 'double'} the
 #'   output is saved to two separate files containing the functions and design definitions,
-#'   and when \code{save_structure = 'all'} the generate, analyse, summarise, and execution code area all saved into
-#'   separate files. The purpose for this structure is because multiple structured files
-#'   often makes organization and debugging slightly easier larger Monte Carlo simulations, though in principle
-#'   all files could be stored into a single R script
+#'   and when \code{save_structure = 'all'} the generate, analyse, summarise, and execution code are all saved into
+#'   separate files. The purpose of this structure is because multiple structured files
+#'   often makes organization and debugging slightly easier for larger Monte Carlo simulations, though, in principle,
+#'   all files could be stored in a single R script
 #'
-#' @param extra_file logical; should and extra file be saved containing user-defined functions or objects?
+#' @param extra_file logical; should an extra file be saved containing user-defined functions or objects?
 #'   Default is \code{FALSE}
 #'
 #' @param summarise include \code{summarise} function? Default is \code{TRUE}
@@ -57,6 +57,9 @@
 #' @param spin_header logical; include a basic \code{knitr::spin} header to allow the simulation
 #'   to be knitted? Default is \code{TRUE}. For those less familiar with \code{spin} documents
 #'   see \code{https://bookdown.org/yihui/rmarkdown-cookbook/spin.html} for further details
+#'
+#' @param clip logical; use the `clipr` package to copy the simulation template to the
+#'  OS clipboard?
 #'
 #' @aliases SimFunctions
 #'
@@ -105,8 +108,10 @@ SimFunctions <- function(filename = NULL, dir = getwd(),
                          save_structure = 'single', extra_file = FALSE,
                          nAnalyses = 1, nGenerate = 1,
                          summarise = TRUE, comments = FALSE, openFiles = TRUE,
-                         spin_header = TRUE, SimSolve = FALSE){
+                         clip = FALSE, spin_header = TRUE, SimSolve = FALSE){
     generate <- TRUE
+    if(clip && is.null(filename))
+        filename <- tempfile()
     if(nGenerate == 0L)
         generate <- FALSE
     if(save_structure == 'single'){
@@ -165,7 +170,7 @@ SimFunctions <- function(filename = NULL, dir = getwd(),
         if(comments) cat('\n### Define essential simulation functions\n')
         if(generate && add.gen){
             if(nGenerate == 1L){
-                cat('\nGenerate <- function(condition, fixed_objects = NULL) {')
+                cat('\nGenerate <- function(condition, fixed_objects) {')
                 if(comments) cat('\n    # Define data generation code ...\n')
                 if(comments) cat('\n    # Return a vector, matrix, data.frame, or list')
                 cat('\n    dat <- data.frame()')
@@ -173,7 +178,7 @@ SimFunctions <- function(filename = NULL, dir = getwd(),
                 cat('\n')
             } else {
                 for(i in 1L:nGenerate){
-                    cat(sprintf('\nGenerate.G%i <- function(condition, fixed_objects = NULL) {', i))
+                    cat(sprintf('\nGenerate.G%i <- function(condition, fixed_objects) {', i))
                     if(i < nGenerate) cat("\n    GenerateIf(TRUE)")
                     if(comments) cat('\n    # Define data generation code ...\n')
                     if(comments) cat('\n    # Return a vector, matrix, data.frame, or list')
@@ -187,14 +192,14 @@ SimFunctions <- function(filename = NULL, dir = getwd(),
         }
         if(add.analyse){
             if(nAnalyses == 1L){
-                cat('\nAnalyse <- function(condition, dat, fixed_objects = NULL) {')
+                cat('\nAnalyse <- function(condition, dat, fixed_objects) {')
                 if(comments) cat('\n    # Run statistical analyses of interest ... \n')
                 if(comments) cat('\n    # Return a named vector or list')
                 cat('\n    ret <- nc(stat1 = NaN, stat2 = NaN)\n    ret\n}')
                 cat('\n\n')
             } else {
                 for(i in 1L:nAnalyses){
-                    cat(sprintf('\nAnalyse.A%i <- function(condition, dat, fixed_objects = NULL) {', i))
+                    cat(sprintf('\nAnalyse.A%i <- function(condition, dat, fixed_objects) {', i))
                     if(comments) cat('\n    # Run statistical analyses of interest ... \n')
                     if(comments) cat('\n    # Return a named vector or list')
                     cat('\n    ret <- nc(stat1 = NaN, stat2 = NaN)\n    ret\n}')
@@ -206,7 +211,7 @@ SimFunctions <- function(filename = NULL, dir = getwd(),
             }
         }
         if(summarise && add.summarise){
-            cat('Summarise <- function(condition, results, fixed_objects = NULL) {')
+            cat('Summarise <- function(condition, results, fixed_objects) {')
             if(comments) cat('\n    # Summarise the simulation results ...\n')
             if(comments) cat('\n    # Return a named vector of results')
             if(SimSolve) cat('\n    ret <- EDR(results)\n    ret\n}\n\n')
@@ -226,7 +231,7 @@ SimFunctions <- function(filename = NULL, dir = getwd(),
                             if(summarise) ', summarise=Summarise)' else ')'))
 
             } else {
-                cat('res <- runSimulation(design=Design, replications=1000,',
+                cat('res <- runSimulation(design=Design, replications=2,',
                     if(generate) 'generate=Generate, ')
                 cat(sprintf('\n                     analyse=Analyse%s',
                             if(summarise) ', summarise=Summarise)' else ')'))
@@ -241,8 +246,8 @@ SimFunctions <- function(filename = NULL, dir = getwd(),
                                           paste0('Generate.G', 1L:nGenerate), collapse=', '))
             else "Generate"
             genspace <- if(nGenerate > 1L) '\n                     ' else ""
-            if(SimSolve) cat('solved <- SimSolve(design=Design, b=VALUE, inverval=RANGE,')
-            else cat('res <- runSimulation(design=Design, replications=1000,')
+            if(SimSolve) cat('solved <- SimSolve(design=Design, b=VALUE, interval=RANGE,')
+            else cat('res <- runSimulation(design=Design, replications=2,')
             if(generate)
                 cat(sprintf('%sgenerate=%s, ', genspace, Generate_string))
             cat(sprintf('\n                     analyse=%s%s', Analyse_string,
@@ -262,8 +267,9 @@ SimFunctions <- function(filename = NULL, dir = getwd(),
     if(is.null(filename) || out.files == 1L){
         if(out.files == 1L){
             if(!is.null(filename)){
-                cat(sprintf('Writing simulation components to file \"%s\" in \n  directory \"%s\"',
-                            paste0(filename, '.R'), dir))
+                if(!clip)
+                    cat(sprintf('Writing simulation components to file \"%s\" in \n  directory \"%s\"',
+                                paste0(filename, '.R'), dir))
                 sink(paste0(filename, '.R'))
             }
         }
@@ -317,7 +323,7 @@ SimFunctions <- function(filename = NULL, dir = getwd(),
             }
         }
     }
-    if(!is.null(filename) && openFiles){
+    if(!clip && !is.null(filename) && openFiles){
         message('\n\nOpening file(s) in your current text editor...')
         if(out.files > 1L){
             if(out.files == 2L){
@@ -335,5 +341,7 @@ SimFunctions <- function(filename = NULL, dir = getwd(),
             file.show(paste0(filename, '-extras.R'))
         file.show(paste0(filename, '.R'))
     }
+    if(clip)
+        clipr::write_clip(readLines(paste0(filename, '.R')))
     invisible(NULL)
 }

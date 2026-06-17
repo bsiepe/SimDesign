@@ -21,9 +21,10 @@
 #' @param type type of bias statistic to return. Default (\code{'bias'}) computes the standard bias
 #'   (average difference between sample and population), \code{'relative'} computes
 #'   the relative bias statistic (i.e., divide the bias by the value
-#'   in \code{parameter}; note that multiplying this by 100 gives the "percent bias" measure),
-#'   \code{'abs_relative'} computes the relative bias but the absolute values of the parameters
-#'   are used in the denominator rather than the (potentially) signed input values,
+#'   in \code{parameter}; note that multiplying this by 100 gives the "percent bias" measure, or
+#'   if Type I error rates (\eqn{\alpha}) are supplied will result in the "percentage error"),
+#'   \code{'abs_relative'} computes the relative bias for each replication independently, takes the
+#'   absolute value of each term, then computes the mean estimate,
 #'   and \code{'standardized'} computes the standardized bias estimate
 #'   (standard bias divided by the standard deviation of the sample estimates)
 #'
@@ -35,6 +36,18 @@
 #'
 #' @param unname logical; apply \code{\link{unname}} to the results to remove any variable
 #'   names?
+#'
+#' @param center function to compute the central tendency. Default uses \code{\link{mean}},
+#'   reflecting the canonical \eqn{mean(\hat{p}_i - p)} difference,
+#'    but other options can be supplied to provide more robust central tendency estimates, such as
+#'   \code{\link{median}} or \code{\(x) mean(x, trim = 0.1)}
+#'
+#' @param deviance function to compute the deviance criterion, currently used when
+#'   \code{type = 'standardize'}. Default uses \code{\link{colSDs}},
+#'   reflecting the canonical standard deviation of an incoming \code{matrix} object (required),
+#'   but other options can be supplied to provide more robust deviation estimates, such as
+#'   \code{\(x) apply(x, 2, IQR)} for the interquartile range. Note that if using an alternative
+#'   \code{center} then, if relevant, this should be adjusted too
 #'
 #' @return returns a \code{numeric} vector indicating the overall (relative/standardized)
 #'   bias in the estimates
@@ -63,12 +76,16 @@
 #' bias(samp, pop)
 #' bias(samp, pop, type = 'relative')
 #' bias(samp, pop, type = 'standardized')
+#' bias(samp, pop, type = 'abs_relative')
 #'
 #' dev <- samp - pop
 #' bias(dev)
 #'
 #' # equivalent here
 #' bias(mean(samp), pop)
+#'
+#' # different center function
+#' bias(samp, pop, center=median)  # median instead of mean
 #'
 #' # matrix input
 #' mat <- cbind(M1=rnorm(100, 2, sd = 0.5), M2 = rnorm(100, 2, sd = 1))
@@ -79,6 +96,8 @@
 #' # different parameter associated with each column
 #' mat <- cbind(M1=rnorm(1000, 2, sd = 0.25), M2 = rnorm(1000, 3, sd = .25))
 #' bias(mat, parameter = c(2,3))
+#' bias(mat, parameter = c(2,3), type='relative')
+#' bias(mat, parameter = c(2,3), type='standardized')
 #'
 #' # same, but with data.frame
 #' df <- data.frame(M1=rnorm(100, 2, sd = 0.5), M2 = rnorm(100, 2, sd = 1))
@@ -89,18 +108,25 @@
 #' estimates <- parameters + rnorm(10)
 #' bias(estimates, parameters)
 #'
+
+#'
 #' # relative difference dividing by the magnitude of parameters
 #' bias(estimates, parameters, type = 'abs_relative')
 #'
 #' # relative bias as a percentage
 #' bias(estimates, parameters, type = 'abs_relative', percent = TRUE)
 #'
+#' # percentage error (PE) statistic given alpha (Type I error) and EDR() result
+#' # edr <- EDR(results, alpha = .05)
+#' edr <- c(.04, .05, .06, .08)
+#' bias(matrix(edr, 1L), .05, type = 'relative', percent = TRUE)
 #'
-bias <- function(estimate, parameter = NULL, type = 'bias', abs = FALSE,
-                 percent = FALSE, unname = FALSE){
+#'
+bias <- function(estimate, parameter = NULL, type = 'bias', center = mean,
+                 deviance = colSDs, abs = FALSE, percent = FALSE, unname = FALSE){
     if(isList(estimate)){
         return(unwind_apply_wind.list(
-            lst=estimate, mat=parameter, fun=bias,
+            lst=estimate, mat=parameter, fun=bias, center=center, deviance=deviance,
             type=type, abs=abs, percent=percent, unname=unname))
     }
 
@@ -113,7 +139,11 @@ bias <- function(estimate, parameter = NULL, type = 'bias', abs = FALSE,
     stopifnot(is.matrix(estimate))
     stopifnot(type %in% c('bias', 'standardized', 'relative', 'abs_relative'))
     n_col <- ncol(estimate)
-    if(type == "relative") stopifnot(!is.null(parameter))
+    if(type %in% c("relative", 'abs_relative')){
+        stopifnot(!is.null(parameter))
+        if(any(parameter == 0))
+            stop('relative measures cannot have any parameter = 0', call.=FALSE)
+    }
     if(is.null(parameter)) parameter <- 0
     if(is.data.frame(parameter)) parameter <- unlist(parameter)
     stopifnot(is.vector(parameter))
@@ -122,10 +152,10 @@ bias <- function(estimate, parameter = NULL, type = 'bias', abs = FALSE,
     if(!equal_len)
         stopifnot(ncol(estimate) == length(parameter))
     diff <- t(t(estimate) - parameter)
-    ret <- if(type == 'relative') colMeans(diff / parameter)
-        else if(type == 'abs_relative') colMeans(diff / abs(parameter))
-        else if(type == 'standardized') colMeans(diff) / colSDs(estimate)
-        else colMeans(diff)
+    ret <- if(type == 'relative') apply(t(diff) / parameter, 1, center)
+        else if(type == 'abs_relative') apply(abs(t(diff) / parameter), 1, center)
+        else if(type == 'standardized') apply(diff, 2, center) / deviance(estimate)
+        else apply(diff, 2, center)
     if(abs) ret <- abs(ret)
     if(percent){
         ret <- ret * 100
@@ -163,6 +193,13 @@ bias <- function(estimate, parameter = NULL, type = 'bias', abs = FALSE,
 #'   \code{'NRMSE'} for the normalized RMSE (RMSE / (max(estimate) - min(estimate))),
 #'   \code{'SRMSE'} for the standardized RMSE (RMSE / sd(estimate)),
 #'   \code{'CV'} for the coefficient of variation, or \code{'RMSLE'} for the root mean-square log-error
+#'
+#' @param center function to compute the central tendency. Default uses \code{\link{mean}},
+#'   reflecting the canonical \eqn{mean((\hat{p}_i - p)^2)} difference (and subsequently square-rooted),
+#'    but other options can be supplied to provide more robust central tendency estimates, such as
+#'   \code{\link{median}} (i.e., root median-squared error) or
+#'   \code{\(x) mean(x, trim = 0.1)}. Note that the centering function is also used in the
+#'   denominator of \code{type = 'CV'} and \code{'RMSLE'}
 #'
 #' @param MSE logical; return the mean square error equivalent of the results instead of the root
 #'   mean-square error (in other words, the result is squared)? Default is \code{FALSE}
@@ -231,11 +268,11 @@ bias <- function(estimate, parameter = NULL, type = 'bias', abs = FALSE,
 #' estimates <- parameters + rnorm(10)
 #' RMSE(estimates, parameters)
 #'
-RMSE <- function(estimate, parameter = NULL, type = 'RMSE', MSE = FALSE,
-                 percent = FALSE, unname = FALSE){
+RMSE <- function(estimate, parameter = NULL, type = 'RMSE', center = mean,
+                 MSE = FALSE, percent = FALSE, unname = FALSE){
     if(isList(estimate)){
         return(unwind_apply_wind.list(
-            lst=estimate, mat=parameter, fun=RMSE,
+            lst=estimate, mat=parameter, fun=RMSE, center=center,
             type=type, MSE=MSE, percent=percent, unname=unname))
     }
 
@@ -256,7 +293,8 @@ RMSE <- function(estimate, parameter = NULL, type = 'RMSE', MSE = FALSE,
     equal_len <- length(estimate) == length(parameter)
     if(!equal_len)
         stopifnot(ncol(estimate) == length(parameter))
-    ret <- sqrt(colMeans(t( (t(estimate) - parameter)^2 )))
+    diff2 <- t( (t(estimate) - parameter)^2 )
+    ret <- sqrt(apply(diff2, 2, center))
     if(type == 'NRMSE'){
         diff <- apply(estimate, 2, max) - apply(estimate, 2, min)
         ret <- ret / diff
@@ -264,9 +302,9 @@ RMSE <- function(estimate, parameter = NULL, type = 'RMSE', MSE = FALSE,
         diff <- apply(estimate, 2, sd)
         ret <- ret / diff
     } else if(type == 'CV'){
-        ret <- ret / colMeans(estimate)
+        ret <- ret / apply(estimate, 2, center)
     } else if(type == 'RMSLE'){
-        ret <- sqrt(colMeans(t(t(log(estimate + 1)) - log(parameter + 1))^2))
+        ret <- sqrt(apply((t(t(log(estimate + 1)) - log(parameter + 1))^2), 2, center))
     } else if(type != 'RMSE')
         stop('type argument not supported')
     if(MSE) ret <- ret^2
@@ -400,6 +438,11 @@ IRMSE <- function(estimate, parameter, fn, density = function(theta, ...) 1,
 #'   \code{'NMSE'} for the normalized MAE (MAE / (max(estimate) - min(estimate))), or
 #'   \code{'SMSE'} for the standardized MAE (MAE / sd(estimate))
 #'
+#' @param center function to compute the central tendency. Default uses \code{\link{mean}},
+#'   reflecting the canonical \eqn{mean((\hat{p}_i - p)^2)} difference,
+#'    but other options can be supplied to provide more robust central tendency estimates, such as
+#'   \code{\link{median}} (i.e., median-squared error) or \code{\(x) mean(x, trim = 0.1)}
+#'
 #' @param percent logical; change returned result to percentage by multiplying by 100?
 #'   Default is FALSE
 #'
@@ -449,11 +492,11 @@ IRMSE <- function(estimate, parameter, fn, density = function(theta, ...) 1,
 #' estimates <- parameters + rnorm(10)
 #' MAE(estimates, parameters)
 #'
-MAE <- function(estimate, parameter = NULL, type = 'MAE',
+MAE <- function(estimate, parameter = NULL, type = 'MAE', center = mean,
                 percent = FALSE, unname = FALSE){
     if(isList(estimate)){
         return(unwind_apply_wind.list(
-            lst=estimate, mat=parameter, fun=MAE,
+            lst=estimate, mat=parameter, fun=MAE, center=center,
             type=type, abs=abs, percent=percent, unname=unname))
     }
 
@@ -472,7 +515,7 @@ MAE <- function(estimate, parameter = NULL, type = 'MAE',
     equal_len <- length(estimate) == length(parameter)
     if(!equal_len)
         stopifnot(ncol(estimate) == length(parameter))
-    ret <- colMeans(t(abs(t(estimate) - parameter)))
+    ret <- apply(t(abs(t(estimate) - parameter)), 2, center)
     if(type == 'NMAE'){
         diff <- apply(estimate, 2, max) - apply(estimate, 2, min)
         ret <- ret / diff
@@ -725,13 +768,13 @@ RAB <- function(x, percent = FALSE, unname = FALSE){
 #'
 #' @examples
 #'
-#' Generate <- function(condition, fixed_objects = NULL) {
+#' Generate <- function(condition, fixed_objects) {
 #'    X <- rep(0:1, each = 50)
 #'    y <- 10 + 5 * X + rnorm(100, 0, .2)
 #'    data.frame(y, X)
 #' }
 #'
-#' Analyse <- function(condition, dat, fixed_objects = NULL) {
+#' Analyse <- function(condition, dat, fixed_objects) {
 #'    mod <- lm(y ~ X, dat)
 #'    so <- summary(mod)
 #'    ret <- c(SE = so$coefficients[,"Std. Error"],
@@ -739,7 +782,7 @@ RAB <- function(x, percent = FALSE, unname = FALSE){
 #'    ret
 #' }
 #'
-#' Summarise <- function(condition, results, fixed_objects = NULL) {
+#' Summarise <- function(condition, results, fixed_objects) {
 #'    MSRSE(SE = results[,1:2], SD = results[,3:4])
 #' }
 #'
@@ -1022,10 +1065,8 @@ ECR <- function(CIs, parameter, tails = FALSE, CI_width = FALSE,
     if(is.data.frame(parameter)) parameter <- unlist(parameter)
     stopifnot(is.vector(parameter))
     if(length(parameter) != 1L) stopifnot(length(parameter) == nrow(CIs))
-    if(CIs[1,1] > CIs[1,2]){
-        warning('First column not less than second. Temporarily switching')
-        CIs <- cbind(CIs[,2L], CIs[,1L])
-    }
+    if(any(CIs[,1] > CIs[,2]))
+        stop('lower CIs higher than upper CIs. Please inspect')
     if(CI_width){
         ret <- mean(CIs[,2L] - CIs[,1L])
         if(!is.null(names))

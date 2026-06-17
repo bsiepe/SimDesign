@@ -19,7 +19,13 @@ reSummarise(
 }
 \arguments{
 \item{summarise}{a summarise function to apply to the read-in files.
-See \code{\link{runSimulation}} for details}
+  See \code{\link{runSimulation}} for details.
+
+  Note that if the simulation contained
+  only one row then the new summarise function can be defined as either
+  \code{summarise <- function(results, fixed_objects)}, if
+  \code{fixed_objects} is required, or
+  \code{summarise <- function(results)},}
 
 \item{dir}{directory pointing to the .rds files to be
 read-in that were saved from \code{runSimulation(..., save_results=TRUE)}.
@@ -69,17 +75,17 @@ and final collection of the respective results.
 
 Design <- createDesign(N = c(10, 20, 30))
 
-Generate <- function(condition, fixed_objects = NULL) {
+Generate <- function(condition, fixed_objects) {
     dat <- with(condition, rnorm(N, 10, 5)) # distributed N(10, 5)
     dat
 }
 
-Analyse <- function(condition, dat, fixed_objects = NULL) {
+Analyse <- function(condition, dat, fixed_objects) {
     ret <- c(mean=mean(dat), median=median(dat)) # mean/median of sample data
     ret
 }
 
-Summarise <- function(condition, results, fixed_objects = NULL){
+Summarise <- function(condition, results, fixed_objects){
     colMeans(results)
 }
 
@@ -94,7 +100,7 @@ runSimulation(design=Design, replications=50,
 res <- reSummarise(Summarise, dir = 'simresults/')
 res
 
-Summarise2 <- function(condition, results, fixed_objects = NULL){
+Summarise2 <- function(condition, results, fixed_objects){
     ret <- c(mean_ests=colMeans(results), SE=colSDs(results))
     ret
 }
@@ -102,7 +108,7 @@ Summarise2 <- function(condition, results, fixed_objects = NULL){
 res2 <- reSummarise(Summarise2, dir = 'simresults/')
 res2
 
-SimClean('simresults/')
+SimClean(dir='simresults/')
 
 }
 

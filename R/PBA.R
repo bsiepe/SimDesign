@@ -10,14 +10,18 @@
 #' approximately when \code{check.interval=TRUE}).
 #' See Waeber, Frazier, and Henderson (2013) for details.
 #'
-#' @param f noisy function for which the root is sought
+#' @param f.root noisy function for which the root is sought
 #'
 #' @param f.prior density function indicating the likely location of the prior
 #'   (e.g., if root is within [0,1] then \code{\link{dunif}} works, otherwise custom
 #'   functions will be required)
 #'
 #' @param interval a vector containing the end-points of the interval
-#'   to be searched for the root
+#'   to be searched for the root of the form \code{c(lower, upper)}.
+#'
+#'   Note that if the interval is specified as \code{c(upper, lower)}, where
+#'   \code{upper > lower} then it the search will be organized such that increasing
+#'   the value of the root estimate will result in lower \code{f(x)} values
 #'
 #' @param tol tolerance criteria for convergence based on average of the
 #'   \code{f(x)} evaluations
@@ -33,8 +37,9 @@
 #'
 #' @param wait.time (optional) instead of terminating after specific estimate criteria
 #'   are satisfied (e.g., \code{tol}), terminate after a specific
-#'   wait time. Input must be a numeric vector indicating the number of minutes to
-#'   wait. Not that users should increase the number of \code{maxiter} as well
+#'   wait time. Input is specified either as a numeric vector in seconds or as a character
+#'   vector to be formatted by \code{\link{timeFormater}}.
+#'   Note that users should increase the number of \code{maxiter} as well
 #'   so that termination can occur if either the maximum iterations are satisfied
 #'   or the specified wait time has elapsed (whichever occurs first)
 #
@@ -119,20 +124,21 @@
 #' plot(retpba.noise, type = 'history')
 #'
 #' \dontrun{
-#' # ignore termination criteria and instead run for 1/2 minutes or 30000 iterations
-#' retpba.noise_30sec <- PBA(f.root_noisy, c(0,1), wait.time = 1/2, maxiter=30000)
+#' # ignore termination criteria and instead run for 30 seconds or 50000 iterations
+#' retpba.noise_30sec <- PBA(f.root_noisy, c(0,1), wait.time = "0:30", maxiter=50000)
 #' retpba.noise_30sec
 #'
 #' }
 #'
-PBA <- function(f, interval, ..., p = .6,
+PBA <- function(f.root, interval, ..., p = .6,
                 integer = FALSE, tol = if(integer) .01 else .0001,
                 maxiter = 300L, miniter = 100L, wait.time = NULL,
                 f.prior = NULL, resolution = 10000L,
                 check.interval = TRUE, check.interval.only = FALSE,
-                verbose = TRUE){
-
+                verbose = interactive()){
     if(maxiter < miniter) maxiter <- miniter
+    if(!is.null(wait.time))
+        wait.time <- timeFormater(wait.time)
     stopifnot(length(p) == 1L)
     if(p <= 0.5)
         stop('Probability must be > 0.5')
@@ -142,29 +148,17 @@ PBA <- function(f, interval, ..., p = .6,
                  call.=FALSE)
     }
 
-    bool.f <- function(f.root, median, ...){
-        val <- valp <- f.root(median, ...)
-        if(integer && !is.null(.SIMDENV$FromSimSolve) && .SIMDENV$FromSimSolve$bolster){
-            if(!all(is.na(.SIMDENV$stored_medhistory))){
-                whc <- which(median == .SIMDENV$stored_medhistory)
-                whc <- whc[-1L]
-                if(length(whc)){
-                    dots <- list(...)
-                    cmp <- dplyr::bind_rows(.SIMDENV$stored_history[whc])
-                    valp <- sum((cmp$y - .SIMDENV$FromSimSolve$b) * cmp$reps,
-                             val * dots$replications) /
-                        sum(cmp$reps, dots$replications)
-                }
-            }
-        }
-        z <- valp < 0
-        c(z, val)
-    }
-
     logp <- log(p)
     logq <- log(1-p)
-
+    reverse_interval <- FALSE
+    if(interval[2] < interval[1]){
+        reverse_interval <- TRUE
+        interval <- sort(interval)
+        logp <- log(1-p)
+        logq <- log(p)
+    }
     dots <- list(...)
+    lastSolve <- NULL
     FromSimSolve <- .SIMDENV$FromSimSolve
     if(!is.null(FromSimSolve)){
         family <- FromSimSolve$family
@@ -178,10 +172,16 @@ PBA <- function(f, interval, ..., p = .6,
         control <- FromSimSolve$control
         # robust <- FromSimSolve$robust
         predCI <- FromSimSolve$predCI
+        predCI.tol <- FromSimSolve$predCI.tol
+        if(!is.null(predCI.tol)){
+            tol <- predCI.tol
+            rel.tol <- 0
+        }
         interpolate.burnin <- FromSimSolve$interpolate.burnin
-        glmpred.last <- glmpred <- c(NA, NA)
+        glmpred.last <- glmpred <- glmpred0 <- c(NA, NA)
         k.success <- FromSimSolve$k.success
         k.successes <- 0L
+        lastSolve <- FromSimSolve$lastSolve
     } else{
         interpolate <- FALSE
         interpolate.burnin <- NULL
@@ -196,18 +196,22 @@ PBA <- function(f, interval, ..., p = .6,
 
     if(check.interval){
         if(!is.null(FromSimSolve)){
-            upper <- bool.f(f.root=f, interval[2L], replications=replications[1L],
+            upper <- bool.f(f.root=f.root, interval[2L], integer=integer,
+                            .SIMDENV = .SIMDENV, replications=replications[1L],
                             store = FALSE, ...)
-            lower <- bool.f(f.root=f, interval[1L], replications=replications[1L],
+            lower <- bool.f(f.root=f.root, interval[1L], integer=integer,
+                            .SIMDENV = .SIMDENV, replications=replications[1L],
                             store = FALSE, ...)
         } else {
-            upper <- bool.f(f.root=f, interval[2L], ...)
-            lower <- bool.f(f.root=f, interval[1L], ...)
+            upper <- bool.f(f.root=f.root, interval[2L], integer=integer, ...)
+            lower <- bool.f(f.root=f.root, interval[1L], integer=integer, ...)
         }
         no_root <- (upper[1L] + lower[1L]) != 1L
         if(no_root){
-            msg <- sprintf('interval range supplied appears to be %s the probable root.',
-                           ifelse(upper[1L] == 0, '*above*', '*below*'))
+            msg <- sprintf(paste0('supplied interval range appears to be %s the probable root.',
+                           '\nResulting root estimates were [%.3f, %.3f]'),
+                           ifelse(upper[1L] == 0, '*above*', '*below*'),
+                           lower[2L], upper[2L])
             old.opts <- options()
             options(warn=1)
             warning(msg, call.=FALSE)
@@ -217,6 +221,20 @@ PBA <- function(f, interval, ..., p = .6,
     }
     glmpred.converged <- FALSE
     iter <- 0L
+    if(!is.null(lastSolve)){
+        # continuation
+        root_info <- attr(lastSolve, 'root')[[1]]
+        iter <- root_info$iter
+        fx <- log(root_info$fx)
+        x <- root_info$x
+        medhistory <- root_info$medhistory
+        roothistory <- root_info$roothistory
+        if(length(medhistory) == maxiter)
+            stop('Please increase the maximum number of iterations', call.=FALSE)
+        roothistory <- c(roothistory, rep(NA, maxiter - length(medhistory)))
+        medhistory <- c(medhistory, numeric(maxiter - length(medhistory)))
+        .SIMDENV$stored_medhistory <- root_info$medhistory
+    }
 
     while(TRUE){
         iter <- iter + 1L
@@ -236,8 +254,9 @@ PBA <- function(f, interval, ..., p = .6,
         }
         medhistory[iter] <- med
         feval <- if(!is.null(FromSimSolve))
-            bool.f(f.root=f, med, replications=replications[iter], ...)
-        else bool.f(f.root=f, med, ...)
+            bool.f(f.root=f.root, med, integer=integer,
+                   .SIMDENV = .SIMDENV, replications=replications[iter], ...)
+        else bool.f(f.root=f.root, med, integer=integer, ...)
         z <- feval[1]
         roothistory[iter] <- feval[2]
         if(z){
@@ -258,7 +277,7 @@ PBA <- function(f, interval, ..., p = .6,
             SimMod <- try(suppressWarnings(glm(formula = formula,
                                                data=SimSolveData, family=family,
                                                weights=weights)), silent=TRUE)
-            glmpred <- if(is(SimMod, 'try-error')){
+            glmpred <- glmpred0 <- if(is(SimMod, 'try-error')){
                 c(NA, NA)
             } else {
                 suppressWarnings(SimSolveUniroot(SimMod=SimMod,
@@ -266,16 +285,24 @@ PBA <- function(f, interval, ..., p = .6,
                                                  interval=quantile(medhistory[medhistory != 0],
                                                                    probs = c(.05, .95)),
                                                  max.interval=interval,
-                                                 median=med))
+                                                 median=med, CI=if(!is.null(predCI.tol)) predCI else NULL))
+            }
+            if(!is.null(predCI.tol)){
+                glmpred[1L] <- glmpred[2L]
+                glmpred.last[1L] <- glmpred[3L]
             }
             if(is.na(glmpred[1L])){
                 glmpred.converged <- FALSE
-                glmpred[1L] <- med
+                glmpred0[1L] <- med
             }
 
             # Should termination occur early when this changes very little?
             if(!any(is.na(c(glmpred[1L], glmpred.last[1L])))){
                 abs_diff <- abs(glmpred.last[1L] - glmpred[1L])
+                if(!is.null(predCI.tol)){
+                    if(glmpred0[2L] < (dots$b - predCI.tol/2)) abs_diff <- tol*2
+                    if(glmpred0[3L] > (dots$b + predCI.tol/2)) abs_diff <- tol*2
+                }
                 rel_diff <- abs_diff / abs(glmpred.last[1L])
                 if(abs_diff <= tol || rel_diff <= rel.tol){
                     k.successes <- k.successes + 1L
@@ -301,31 +328,67 @@ PBA <- function(f, interval, ..., p = .6,
             if(interpolate && iter > interpolate.after && !is.na(glmpred[1L]))
                 cat(sprintf(paste0('; k.tol = %i; Pred = %',
                                    if(integer) ".1f" else ".3f"),
-                            k.successes, glmpred[1L]))
+                            k.successes, glmpred0[1L]))
+            utils::flush.console()
         }
 
         if(!is.null(wait.time))
-            if(proc.time()[3L] - start_time > wait.time*60) break
+            if(proc.time()[3L] - start_time > wait.time) break
 
         if(iter == maxiter) break
     }
     converged <- iter < maxiter
     predCIs <- c(NA, NA, NA)
-    if(!is.null(FromSimSolve))
+    predCIs_root <- c(NA, NA)
+    if(!is.null(FromSimSolve)){
+        names(predCIs_root) <- paste0('CI_', predCI*100)
         predCIs <- SimSolveUniroot(SimMod=SimMod, b=dots$b,
                                interval=quantile(medhistory[medhistory != 0],
                                                  probs = c(.05, .95)),
                                max.interval=interval,median=med, CI=predCI)
+        sintervals <- rbind(c(min(medhistory[medhistory != 0]), predCIs[1]),
+                            c(predCIs[1], max(medhistory[medhistory != 0])))
+        if(reverse_interval)
+            sintervals <- rbind(sintervals[2,], sintervals[1,])
+        predCIs_root[1L] <- SimSolveUniroot(SimMod=SimMod, b=predCIs[2L],
+                                            interval=sintervals[1,],
+                                            max.interval=c(interval[1], predCIs[1]), median=med, CI=predCI)[1L]
+        predCIs_root[2L] <- SimSolveUniroot(SimMod=SimMod, b=predCIs[3L],
+                                            interval=sintervals[2,],
+                                            max.interval=c(predCIs[1], interval[2]), median=med, CI=predCI)[1L]
+        predCIs_root <- sort(predCIs_root)
+        if(any(is.na(predCIs_root[1:2]))){
+            SimMod2 <- try(suppressWarnings(glm(formula = y~x,
+                                                data=SimSolveData, family=family,
+                                                weights=weights)), silent=TRUE)
+            if(is.na(predCIs_root[1]))
+                predCIs_root[1L] <- SimSolveUniroot(SimMod=SimMod2, b=predCIs[2L],
+                                                    interval=sintervals[1,],
+                                                    max.interval=c(interval[1], predCIs[1]), median=med, CI=predCI)[1L]
+            if(is.na(predCIs_root[2]))
+                predCIs_root[2L] <- SimSolveUniroot(SimMod=SimMod2, b=predCIs[3L],
+                                                    interval=sintervals[2,],
+                                                    max.interval=c(predCIs[1], interval[2]), median=med, CI=predCI)[1L]
+        }
+    }
     if(verbose)
         cat("\n")
     fx <- exp(fx) / sum(exp(fx)) # normalize final result
-    medhistory <- medhistory[1L:(iter-1L)]
+    medhistory <- medhistory[1L:iter]
     # BI <- belief_interval(x, fx, CI=CI)
-    root <- if(!interpolate) medhistory[length(medhistory)] else glmpred[1L]
+    root <- if(!interpolate || is.na(glmpred0[1]))
+        medhistory[length(medhistory)] else glmpred0[1L]
+    if(interpolate && is.na(glmpred0[1]))
+        warning('Interpolation model failed; root set to last PBA estimate',
+                call.=FALSE)
     ret <- list(iter=iter, root=root, terminated_early=converged, integer=integer,
-                e.froot=e.froot, x=x, fx=fx, medhistory=medhistory,
+                e.froot=e.froot, x=x, fx=fx,
+                medhistory=medhistory, roothistory=roothistory[1:length(medhistory)],
+                stored_results=.SIMDENV$stored_results,
+                stored_history=.SIMDENV$stored_history,
                 time=as.numeric(proc.time()[3L]-start_time),
-                burnin=interpolate.burnin, predCIs=predCIs[-1L])
+                burnin=interpolate.burnin, b=dots$b,
+                predCIs=predCIs[-1L], predCIs_root=predCIs_root)
     if(!is.null(FromSimSolve)) ret$total.replications <- sum(replications[1L:iter])
     class(ret) <- 'PBA'
     ret
@@ -339,10 +402,12 @@ print.PBA <- function(x, ...)
     out <- with(x,
          list(root = root,
               terminated_early=terminated_early,
-              time=noquote(timeFormater(time)),
+              time=noquote(timeFormater_internal(time)),
               iterations = iter))
     if(!all(is.na(x$predCIs)))
-        out <- append(out, list(prediction_CI = x$predCIs), 2L)
+        out <- append(out, list(predCI.root = x$predCIs_root,
+                                b = x$b,
+                                predCI.b = x$predCIs), 1L)
     if(!is.null(x$total.replications))
         out$total.replications <- x$total.replications
     if(x$integer && !is.null(x$tab))
@@ -386,6 +451,27 @@ getMedian <- function(fx, x){
         if(!length(ret)) ret <- xs[1L]
     }
     ret[length(ret)]
+}
+
+bool.f <- function(f.root, median, integer, .SIMDENV = NULL, ...){
+    val <- valp <- if(!is.null(.SIMDENV$FromSimSolve))
+        f.root(median, integer=integer, ...)
+    else f.root(median, ...)
+    if(integer && !is.null(.SIMDENV$FromSimSolve) && .SIMDENV$FromSimSolve$bolster){
+        if(!all(is.na(.SIMDENV$stored_medhistory))){
+            whc <- which(median == .SIMDENV$stored_medhistory)
+            whc <- whc[-1L]
+            if(length(whc)){
+                dots <- list(...)
+                cmp <- dplyr::bind_rows(.SIMDENV$stored_history[whc])
+                valp <- sum((cmp$y - .SIMDENV$FromSimSolve$b) * cmp$reps,
+                            val * dots$replications) /
+                    sum(cmp$reps, dots$replications)
+            }
+        }
+    }
+    z <- valp < 0
+    c(z, val)
 }
 
 # belief_interval <- function(x, fx, CI = .95){

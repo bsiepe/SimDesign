@@ -2,23 +2,53 @@
 % Please edit documentation in R/SimExtract.R
 \name{SimExtract}
 \alias{SimExtract}
-\title{Function to extract extra information from SimDesign objects}
+\title{Extract extra information from SimDesign objects}
 \usage{
-SimExtract(object, what, fuzzy = TRUE)
+SimExtract(object, what, fuzzy = TRUE, append = TRUE)
 }
 \arguments{
 \item{object}{object returned from \code{\link{runSimulation}}}
 
-\item{what}{character indicating what information to extract. Possible inputs
-  include \code{'errors'} to return a \code{tibble} object containing counts of any
-  error messages, \code{'warnings'} to return a \code{data.frame} object containing
-  counts of any warning messages, \code{'error_seeds'} and \code{'warning_seeds'}
-  to extract the associated \code{.Random.seed} values associated with the ERROR/WARNING messages,
-  \code{'results'} to extract the simulation results if the option \code{store_results} was passed to
-  \code{\link{runSimulation}}, \code{'filename'} and \code{'save_results_dirname'} for extracting
-  the saved file/directory name information (if used),
-  and \code{'summarise'} if the \code{\link{Summarise}}
-  definition returned a named \code{list} rather than a named numeric vector.
+\item{what}{character vector indicating what information to extract, written in agnostic casing
+  (e.g., \code{'ERRORS'} and \code{'errors'} are equivalent). Possible inputs include
+
+  \describe{
+  \item{\code{'errors'}}{to return a \code{tibble} object containing counts of any
+  error messages}
+
+  \item{\code{'warnings'}}{ to return a \code{data.frame} object containing
+  counts of any warning messages}
+
+  \item{\code{'seeds'}}{  for the specified random number
+  generation seeds}
+
+  \item{\code{'Random.seeds'}}{ for the complete list of
+  \code{.Random.seed} states across replications (only stored when
+  \code{runSimulation(..., control = list(store_Random.seeds=TRUE))})}
+
+  \item{\code{'log_times'}}{ for the per replication generate/analyse
+  execution times (recorded in seconds)}
+
+  \item{\code{'error_seeds'} and \code{'warning_seeds'}}{
+  to extract the associated \code{.Random.seed} values associated with the ERROR/WARNING messages}
+
+  \item{\code{'prepare_seeds'}}{ to extract the \code{.Random.seed} states captured before
+  \code{prepare()} was called for each condition}
+
+  \item{\code{'prepare_error_seed'}}{ to extract the
+  \code{.Random.seed} state when \code{prepare()} encountered an error (useful for debugging with
+  \code{load_seed_prepare})}
+
+  \item{\code{'results'}}{ to extract the simulation results if the option \code{store_results} was passed to
+  \code{\link{runSimulation}}},
+
+  \item{\code{'filename'} and  \code{'save_results_dirname'}}{ for extracting
+  the saved file/directory name information (if used), \code{'functions'} to extract the defined functions
+  used in the experiment}
+
+  \item{\code{'design'}}{ to extract the original design object}
+
+  }
 
   Note that \code{'warning_seeds'} are not stored automatically in
   simulations and require passing \code{store_warning_seeds = TRUE} to \code{\link{runSimulation}}.}
@@ -28,9 +58,11 @@ For example, when attempting to invert a matrix the error message
 \emph{"System is computationally singular: reciprocal condition number = 1.92747e-17"} and
 \emph{"System is computationally singular: reciprocal condition number = 2.15321e-16"} are
 effectively the same, and likely should be reported in the same columns of the extracted output}
+
+\item{append}{logical; append the design conditions when extracting error/warning messages?}
 }
 \description{
-Function used to extract any error or warnings messages, the seeds associated
+Extracts any error or warnings messages, the seeds associated
 with any error or warning messages, and any analysis results that were stored in the
 final simulation object.
 }
@@ -38,35 +70,35 @@ final simulation object.
 
 \dontrun{
 
-Generate <- function(condition, fixed_objects = NULL) {
+Generate <- function(condition, fixed_objects) {
     int <- sample(1:10, 1)
     if(int > 5) warning('GENERATE WARNING: int greater than 5')
-    if(int == 1) stop('GENERATE WARNING: integer is 1')
+    if(int == 1) stop('GENERATE ERROR: integer is 1')
     rnorm(5)
 }
 
-Analyse <- function(condition, dat, fixed_objects = NULL) {
+Analyse <- function(condition, dat, fixed_objects) {
     int <- sample(1:10, 1)
     if(int > 5) warning('ANALYSE WARNING: int greater than 5')
-    if(int == 1) stop('ANALYSE WARNING: int is 1')
+    if(int == 1) stop('ANALYSE ERROR: int is 1')
     c(ret = 1)
 }
 
-Summarise <- function(condition, results, fixed_objects = NULL) {
+Summarise <- function(condition, results, fixed_objects) {
     mean(results)
 }
 
-res <- runSimulation(replications = 100, seed=1234, verbose=FALSE,
+res <- runSimulation(replications = 100, seed=1234,
                      generate=Generate, analyse=Analyse, summarise=Summarise)
 res
 
-SimExtract(res, what = 'errors')
-SimExtract(res, what = 'warnings')
+SimExtract(res, what = 'errors')     # see also SimErrors()
+SimExtract(res, what = 'warnings')   # see also SimWarnings()
 seeds <- SimExtract(res, what = 'error_seeds')
 seeds[,1:3]
 
 # replicate a specific error for debugging (type Q to exit debugger)
-res <- runSimulation(replications = 100, load_seed=seeds[,1], debug='analyse',
+res <- runSimulation(replications = 100, load_seed=seeds[,1], debug='analyse-1',
                      generate=Generate, analyse=Analyse, summarise=Summarise)
 
 
@@ -81,6 +113,9 @@ with the SimDesign Package. \code{The Quantitative Methods for Psychology, 16}(4
 Sigal, M. J., & Chalmers, R. P. (2016). Play it again: Teaching statistics with Monte
 Carlo simulation. \code{Journal of Statistics Education, 24}(3), 136-156.
 \doi{10.1080/10691898.2016.1246953}
+}
+\seealso{
+\code{\link{SimErrors}}, \code{\link{SimWarnings}}
 }
 \author{
 Phil Chalmers \email{rphilip.chalmers@gmail.com}

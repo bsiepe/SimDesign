@@ -9,7 +9,8 @@ Attach(
   omit = NULL,
   check = TRUE,
   attach_listone = TRUE,
-  RStudio_flags = FALSE
+  RStudio_flags = FALSE,
+  clip = interactive()
 )
 }
 \arguments{
@@ -33,6 +34,10 @@ adding an often unnecessary list 1 index, such as \code{name <- list[[1L]]}}
 \item{RStudio_flags}{logical; print R script output comments that disable flagged
 missing variables in RStudio? Requires the form \code{Attach(Design, RStudio_flags=TRUE)} or
 in an interactive debugging session \code{Attach(condition, RStudio_flags=TRUE)}}
+
+\item{clip}{when \code{Rstudio_flags = TRUE} should the output be copied to the
+clipboard using \code{clipr}? Makes it easier to paste into existing code. Only
+clipped in interactive mode}
 }
 \description{
 The behaviour of this function is very similar to \code{\link{attach}},
@@ -60,7 +65,7 @@ Design <- createDesign(N1=c(10,20),
 Design
 
 # does not use Attach()
-Generate <- function(condition, fixed_objects = NULL) {
+Generate <- function(condition, fixed_objects ) {
     # condition = single row of Design input (e.g., condition <- Design[1,])
     N1 <- condition$N1
     N2 <- condition$N2
@@ -74,7 +79,7 @@ Generate <- function(condition, fixed_objects = NULL) {
 }
 
 # similar to above, but using the Attach() function instead of indexing
-Generate <- function(condition, fixed_objects = NULL) {
+Generate <- function(condition, fixed_objects ) {
     Attach(condition) # N1, N2, and sd are now 'attached' and visible
 
     group1 <- rnorm(N1)
@@ -94,7 +99,7 @@ Attach(Design, RStudio_flags=TRUE)
 # when # !diagnostics ... is added added to the source file(s)
 
 # !diagnostics suppress=N1,N2,sd
-Generate <- function(condition, fixed_objects = NULL) {
+Generate <- function(condition, fixed_objects ) {
     Attach(condition) # N1, N2, and sd are now 'attached' and visible
 
     group1 <- rnorm(N1)

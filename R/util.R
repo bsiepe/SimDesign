@@ -1,11 +1,37 @@
 .SIMDENV <- new.env(parent=emptyenv())
 
 # return a character vector of functions defined in .GlobalEnv
-parent_env_fun <- function(){
-    nms <- ls(envir = parent.frame(2L))
-    is_fun <- sapply(nms, function(x, envir) is.function(get(x, envir=envir)),
-                     envir = parent.frame(2L))
-    return(nms[is_fun])
+parent_env_fun <- function(level=2){
+    ret <- NULL
+    for(lev in level:2){
+        nms <- ls(envir = parent.frame(lev))
+        is_fun <- sapply(nms, function(x, envir) is.function(get(x, envir=envir)),
+                         envir = parent.frame(lev))
+        if(any(is_fun)) ret <- c(ret, nms[is_fun])
+    }
+    ret
+}
+
+unique_filename <- function(filename, safe = TRUE, verbose = TRUE,
+                            ext = '.rds'){
+    if(!is.null(filename) && safe){ #save file
+        filename <- gsub('.rds', "", filename)
+        filename0 <- filename
+        count <- 1L
+        # create a new file name if old one exists, and throw warning
+        while(TRUE){
+            filename <- paste0(filename, ext)
+            if(file.exists(filename)){
+                filename <- paste0(filename0, '-', count)
+                count <- count + 1L
+            } else break
+        }
+        if(count > 1L)
+            if(verbose && safe)
+                message(paste0('\nWARNING:\n', filename0, 'existed in the working directory.
+                               Using a unique file name instead.\n'))
+    }
+    filename
 }
 
 load_packages <- function(packages){
@@ -26,7 +52,7 @@ get_packages <- function(packages){
 }
 
 # base-code borrowed and modified from pbapply
-timeFormater <- function(time, decimals = TRUE){
+timeFormater_internal <- function(time, decimals = TRUE){
     dec <- time - floor(time)
     time <- floor(time - dec)
     dec <- round(dec, 2)
@@ -66,52 +92,40 @@ print_progress <- function(row, trow, stored_time, RAM, progress,
             condstring <- paste0(nms, '=', nms2, collapse=', ')
         }
     }
-    if(RAM != "") RAM <- sprintf(';   RAM Used: %s', RAM)
-    cat(sprintf('\rDesign: %i/%i%s;   Replications: %i;   Total Time: %s ',
-                row, trow, RAM, replications, timeFormater(sum(stored_time))))
+    if(RAM != "") RAM <- sprintf(';   RAM Used: %s;', RAM)
+    if(row == 1 && trow == 1)
+        cat(sprintf('\rReplications: %i%s   ', replications, RAM))
+    else
+        cat(sprintf('\rDesign: %i/%i;   Replications: %i%s   Total Time: %s ',
+                    row, trow, replications, RAM, timeFormater_internal(sum(stored_time))))
     cat(sprintf('\n Conditions: %s\n', condstring))
     if(progress) cat('\r')
+    utils::flush.console()
     invisible(NULL)
 }
 
 myundebug <- function(fun) if(isdebugged(fun)) undebug(fun)
 
-notification_condition <- function(condition, results, total){
-    RPushbullet::pbPost(type = 'note',
-                        title = sprintf("Condition %i/%i completed", condition$ID, total),
-                        body = sprintf("Execution time: %s \nErrors: %i \nWarnings: %i",
-                                       timeFormater(results$SIM_TIME),
-                                       ifelse(is.null(results$ERRORS), 0, results$ERRORS),
-                                       ifelse(is.null(results$WARNINGS), 0, results$WARNINGS)))
-
-    invisible(NULL)
-}
-
-notification_final <- function(Final){
-    RPushbullet::pbPost(type = 'note',
-                        title = "Simulation completed",
-                        body = sprintf("Total execution time: %s \nTotal Errors: %i \nTotal Warnings: %i",
-                                       timeFormater(sum(Final$SIM_TIME)),
-                                       ifelse(is.null(Final$ERRORS), 0, sum(Final$ERRORS)),
-                                       ifelse(is.null(Final$WARNINGS), 0, sum(Final$WARNINGS))))
-    invisible(NULL)
-}
-
-#' Suppress function messages and Concatenate and Print (cat)
+#' Suppress verbose function messages
 #'
 #' This function is used to suppress information printed from external functions
-#' that make internal use of \code{link{message}} and \code{\link{cat}}, which
+#' that make internal use of \code{\link{message}} and \code{\link{cat}}, which
 #' provide information in interactive R sessions. For simulations, the session
 #' is not interactive, and therefore this type of output should be suppressed.
-#' For similar behaviour for suppressing warning messages see
-#' \code{\link{suppressWarnings}}, though use this function carefully as some
-#' warnings can be meaningful and unexpected.
+#' For similar behaviour for suppressing warning messages, see
+#' \code{\link{manageWarnings}}.
 #'
 #' @param ... the functional expression to be evaluated
 #'
-#' @param messages logical; suppress all messages?
+#' @param cat logical; also capture calls from \code{\link{cat}}? If
+#'   \code{FALSE} only \code{\link{message}} will be suppressed
 #'
-#' @param cat logical; suppress all concatenate and print calls from \code{\link{cat}}?
+#' @param keep logical; return a character vector of the messages/concatenate
+#'   and print strings as an attribute to the resulting object from \code{expr(...)}?
+#'
+#' @param attr.name attribute name to use when \code{keep = TRUE}
+#'
+#' @seealso \code{\link{manageWarnings}}
 #'
 #' @export
 #'
@@ -126,11 +140,14 @@ notification_final <- function(Final){
 #' \doi{10.1080/10691898.2016.1246953}
 #'
 #' @examples
-#' myfun <- function(x){
+#'
+#' myfun <- function(x, warn=FALSE){
 #'    message('This function is rather chatty')
 #'    cat("It even prints in different output forms!\n")
 #'    message('And even at different....')
 #'    cat("...times!\n")
+#'    if(warn)
+#'      warning('It may even throw warnings!')
 #'    x
 #' }
 #'
@@ -141,14 +158,29 @@ notification_final <- function(Final){
 #' out <- quiet(myfun(1))
 #' out
 #'
-quiet <- function(..., messages=FALSE, cat=FALSE){
-    if(!cat){
-        tmpf <- tempfile()
-        sink(tmpf)
-        on.exit({sink(); file.remove(tmpf)})
-    }
-    out <- if(messages) eval(...) else suppressMessages(eval(...))
-    out
+#' # which messages are suppressed? Extract stored attribute
+#' out <- quiet(myfun(1), keep = TRUE)
+#' attr(out, 'quiet.messages')
+#'
+#' # Warning messages still get through (see manageWarnings(suppress)
+#' #  for better alternative than using suppressWarnings())
+#' out2 <- myfun(2, warn=TRUE) |> quiet() # warning gets through
+#' out2
+#'
+#' # suppress warning message explicitly, allowing others to be raised if present
+#' myfun(2, warn=TRUE) |> quiet() |>
+#'    manageWarnings(suppress='It may even throw warnings!')
+#'
+quiet <- function(..., cat=TRUE, keep=FALSE, attr.name='quiet.messages'){
+    fun <- function(x) eval(x)
+    capts <- NULL
+    mess <- if(cat)
+        testthat::capture_messages(
+            testthat::capture_output_lines(ret <- fun(...)) -> capts)
+    else testthat::capture_messages(ret <- fun(...))
+    if(keep)
+        attr(ret, attr.name) <- c(message.=mess, cat.=capts)
+    ret
 }
 
 #' Auto-named Concatenation of Vector or List
@@ -296,21 +328,23 @@ reduceTable <- function(tab){
 
 }
 
-sim_results_check <- function(sim_results){
+sim_results_check <- function(sim_results, return_list = FALSE){
     if(is(sim_results, 'try-error'))
         stop(c("Summarise() should not throw errors. Message was:\n    ", sim_results), call.=FALSE)
-    if(is.data.frame(sim_results)){
-        if(nrow(sim_results) > 1L)
-            stop('When returning a data.frame in summarise() there should only be 1 row',
-                 call.=FALSE)
-        nms <- names(sim_results)
-        sim_results <- as.numeric(sim_results)
-        names(sim_results) <- nms
+    if(is.data.frame(sim_results) || is.matrix(sim_results)){
+        if(nrow(sim_results) > 1L){
+            sim_results <- list(sim_results)
+        } else {
+            nms <- colnames(sim_results)
+            sim_results <- as.numeric(sim_results)
+            names(sim_results) <- nms
+        }
     }
     if(isList(sim_results)){
-        if(is.null(names(sim_results)))
+        if(length(sim_results) > 1L && is.null(names(sim_results)))
             stop("List elements must be named in Summarise() definition",
                  call.=FALSE)
+        if(return_list) return(sim_results)
         ret <- numeric(0)
         attr(ret, 'summarise_list') <- sim_results
         return(ret)
@@ -340,7 +374,50 @@ unwind_apply_wind.list <- function(lst, mat, fun, ...){
     ret
 }
 
-combined_Analyses <- function(condition, dat, fixed_objects = NULL){
+lapply_timer <- function(X, FUN, max_time, max_RAM, ...){
+    if(is.finite(max_time)){
+        ret <- vector('list', length(X))
+        total <- max_time
+        elapsed <- 0
+        time_left <- total
+        for(i in 1L:length(ret)){
+            st <- proc.time()['elapsed']
+            val <- R.utils::withTimeout(FUN(i, ...),
+                                        timeout = time_left,
+                                        onTimeout = 'warning')
+            elapsed <- elapsed + proc.time()['elapsed'] - st
+            time_left <- total - elapsed
+            ret[[i]] <- val
+            if(time_left <= 0){
+                message(sprintf(c("Simulation terminated due to max_time constraint",
+                                " (%i/%i replications evaluated)."), i, length(ret)))
+                ret <- ret[1L:i]
+                break
+            }
+            if(is.finite(max_RAM) && object.size(ret) > max_RAM){
+                message(sprintf(c("Simulation terminated due to max_RAM constraint",
+                                  " (%i/%i replications evaluated)."), i, length(ret)))
+                ret <- ret[1L:i]
+                break
+            }
+        }
+    } else {
+        ret <- vector('list', length(X))
+        for(i in 1L:length(ret)){
+            val <- FUN(i, ...)
+            ret[[i]] <- val
+            if(is.finite(max_RAM) && object.size(ret) > max_RAM){
+                message(sprintf(c("Simulation terminated due to max_RAM constraint",
+                                  " (%i/%i replications evaluated)."), i, length(ret)))
+                ret <- ret[1L:i]
+                break
+            }
+        }
+    }
+    ret
+}
+
+combined_Analyses <- function(condition, dat, fixed_objects){
     if(!is.null(.SIMDENV$ANALYSE_FUNCTIONS)){
         ANALYSE_FUNCTIONS <- .SIMDENV$ANALYSE_FUNCTIONS
         TRY_ALL_ANALYSE <- .SIMDENV$TRY_ALL_ANALYSE
@@ -378,7 +455,7 @@ combined_Analyses <- function(condition, dat, fixed_objects = NULL){
     ret
 }
 
-combined_Generate <- function(condition, fixed_objects = NULL){
+combined_Generate <- function(condition, fixed_objects){
     if(!is.null(.SIMDENV$GENERATE_FUNCTIONS))
         GENERATE_FUNCTIONS <- .SIMDENV$GENERATE_FUNCTIONS
     nfuns <- length(GENERATE_FUNCTIONS)
@@ -401,7 +478,7 @@ combined_Generate <- function(condition, fixed_objects = NULL){
 
 toTabledResults <- function(results){
     tabled_results <- if(is.data.frame(results[[1]]) && nrow(results[[1L]]) == 1L){
-        as.matrix(dplyr::bind_rows(results))
+        dplyr::bind_rows(results)
     } else if((is.data.frame(results[[1]]) && nrow(results[[1]]) > 1L) || is.list(results[[1L]])){
         results
     } else {
@@ -445,6 +522,7 @@ SimSolveUniroot <- function(SimMod, b, interval, max.interval, median, CI=NULL){
         predict(SimMod, newdata = data.frame(x=x), type = 'response') - b
     res <- try(uniroot(f.root, b=b, interval = interval), silent = TRUE)
     if(is(res, 'try-error')){
+        org.interval <- interval
         # in case original interval is poor for interpolation
         interval <- max.interval
         for(i in seq_len(20L)){
@@ -531,7 +609,7 @@ bisection <- function (f, interval, ..., tol = 0.001, maxiter = 100,
          false_converge=false_converge)
 }
 
-RAM_used <- function(){
+RAM_used <- function(format=TRUE){
     # borrowed and modified from pryr::node_size(), 13-06-2023
     bit <- 8L * .Machine$sizeof.pointer
     if (!(bit == 32L || bit == 64L)) {
@@ -541,6 +619,7 @@ RAM_used <- function(){
     # end borrowed portion
     bytes <- sum(gc()[, 1] * c(val, 8))
     size <- structure(bytes, class="object_size")
+    if(!format) return(size)
     format(size, 'MB')
 }
 
@@ -596,4 +675,402 @@ pickReps <- function(replications, iter){
     ret <- if(iter > length(replications))
         max(replications) else replications[iter]
     ret
+}
+
+set_seed <- function(seed){
+    if(is.list(seed)) .GlobalEnv$.Random.seed <- seed[[1L]]
+    else set.seed(seed)
+    invisible(NULL)
+}
+
+recvResult_fun <- utils::getFromNamespace("recvResult", "parallel")
+
+#' Set RNG sub-stream for  Pierre L'Ecuyer's RngStreams
+#'
+#' Sets the sub-stream RNG state within for Pierre L'Ecuyer's (1999)
+#' algorithm. Should be used within distributed array jobs
+#' after suitable L'Ecuyer's (1999) have been distributed to each array, and
+#' each array is further defined to use multi-core processing. See
+#' \code{\link[parallel]{clusterSetRNGStream}} for further information.
+#'
+#' @param seed An integer vector of length 7 as given by \code{.Random.seed} when
+#'   the L'Ecuyer-CMR RNG is in use. See\code{\link{RNG}} for the valid values
+#' @param cl A cluster from the \code{parallel} package, or
+#'   (if \code{NULL}) the registered cluster
+#' @return invisible NULL
+#' @export
+#'
+#'
+clusterSetRNGSubStream <- function(cl, seed){
+    nc <- length(cl)
+    seeds <- vector("list", nc)
+    seeds[[1L]] <- seed[[1L]]
+    for (i in seq_len(nc - 1L)) seeds[[i + 1L]] <-
+        parallel::nextRNGSubStream(seeds[[i]])
+    for (i in seq_along(cl)) {
+        expr <- substitute(assign(".Random.seed", seed, envir = .GlobalEnv),
+                           list(seed = seeds[[i]]))
+        sendCall.imp(cl[[i]], eval, list(expr))
+    }
+    checkForRemoteErrors.imp(lapply(cl, recvResult_fun))
+    invisible()
+}
+
+sendCall.imp <- utils::getFromNamespace('sendCall', 'parallel')
+checkForRemoteErrors.imp <- utils::getFromNamespace('checkForRemoteErrors',
+                                                    'parallel')
+
+valid_results <- function(x)
+    is(x, 'numeric') || is(x, 'data.frame') || is(x, 'list') || is(x, 'logical') || is(x, 'try-error')
+
+#' Generate random seeds
+#'
+#' Generate seeds to be passed to \code{runSimulation}'s \code{seed} input. Values
+#' are sampled from 1 to 2147483647, or are generated using L'Ecuyer-CMRG's (2002)
+#' method (returning either a list if \code{arrayID} is omitted, or the specific
+#' row value from this list if \code{arrayID} is included).
+#'
+#' @param design design matrix that requires a unique seed per condition, or
+#'   a number indicating the number of seeds to generate. Default generates one
+#'   number
+#'
+#' @param iseed the initial \code{set.seed} number used to generate a sequence
+#'   of independent seeds according to the L'Ecuyer-CMRG (2002) method. This
+#'   is recommended whenever quality random number generation is required
+#'   across similar (if not identical) simulation jobs
+#'   (e.g., see \code{\link{runArraySimulation}}). If \code{arrayID} is not
+#'   specified then this will return a list of the associated seed for the
+#'   full \code{design}
+#'
+#' @param arrayID (optional) single integer input corresponding to the specific
+#'   row in the \code{design} object when using the \code{iseed} input.
+#'   This is used in functions such as \code{\link{runArraySimulation}}
+#'   to pull out the specific seed rather than manage a complete list, and
+#'   is therefore more memory efficient
+#'
+#' @param old.seeds (optional) vector or matrix of last seeds used in
+#'   previous simulations to avoid repeating the same seed on a subsequent run.
+#'   Note that this approach should be used sparingly as seeds set more frequently
+#'   are more likely to correlate, and therefore provide less optimal random
+#'   number behaviour (e.g., if performing a simulation on two runs to achieve
+#'   5000 * 2 = 10,000 replications this is likely reasonable,
+#'   but for simulations with 100 * 2 = 200 replications this is more
+#'   likely to be sub-optimal).
+#'   Length must be equal to the number of rows in \code{design}
+#'
+#' @export
+#'
+#' @author Phil Chalmers \email{rphilip.chalmers@@gmail.com}
+#'
+#' @examples
+#'
+#' # generate 1 seed (default)
+#' genSeeds()
+#'
+#' # generate 5 unique seeds
+#' genSeeds(5)
+#'
+#' # generate from nrow(design)
+#' design <- createDesign(factorA=c(1,2,3),
+#'                        factorB=letters[1:3])
+#' seeds <- genSeeds(design)
+#' seeds
+#'
+#' # construct new seeds that are independent from original (use this sparingly)
+#' newseeds <- genSeeds(design, old.seeds=seeds)
+#' newseeds
+#'
+#' # can be done in batches too
+#' newseeds2 <- genSeeds(design, old.seeds=cbind(seeds, newseeds))
+#' cbind(seeds, newseeds, newseeds2) # all unique
+#'
+#' ############
+#' # generate seeds for runArraySimulation()
+#' (iseed <- genSeeds())  # initial seed
+#' seed_list <- genSeeds(design, iseed=iseed)
+#' seed_list
+#'
+#' # expand number of unique seeds given iseed (e.g., in case more replications
+#' # are required at a later date)
+#' seed_list_tmp <- genSeeds(nrow(design)*2, iseed=iseed)
+#' str(seed_list_tmp) # first 9 seeds identical to seed_list
+#'
+#' # more usefully for HPC, extract only the seed associated with an arrayID
+#' arraySeed.15 <- genSeeds(nrow(design)*2, iseed=iseed, arrayID=15)
+#' arraySeed.15
+#'
+genSeeds <- function(design = 1L, iseed = NULL, arrayID = NULL, old.seeds = NULL){
+    if(missing(design)) design <- 1L
+    if(is.numeric(design))
+        design <- matrix(NA, nrow=design)
+    if(is.null(iseed)){
+        seed <- rint(nrow(design), min=1L, max = 2147483647L)
+        if(!is.null(old.seeds)){
+            old.seeds <- as.vector(old.seeds)
+            while(TRUE){
+                whc <- which(seed %in% old.seeds)
+                if(length(whc)){
+                    seed[whc] <- rint(nrow(design), min=1L, max = 2147483647L)
+                    next
+                }
+                break
+            }
+        }
+    } else {
+        rngkind <- RNGkind()
+        RNGkind("L'Ecuyer-CMRG")
+        on.exit({RNGkind(rngkind[1L]); set.seed(NULL)})
+        seed <- if(!is.null(arrayID)) vector('list', 1L)
+            else vector('list', nrow(design))
+        set.seed(iseed)
+        seed[[1L]] <- .Random.seed
+        if(!is.null(arrayID)){
+            stopifnot(is.numeric(arrayID) && length(arrayID) == 1L)
+            if(arrayID < 1L || arrayID > nrow(design))
+                stop('arrayID not associated with valid row in design')
+            seed.i <- seed[[1L]]
+            if(arrayID > 1L){
+                for (i in 2L:arrayID)
+                    seed.i <- nextRNGStream(seed.i)
+            }
+            seed[[1L]] <- seed.i
+            attr(seed, 'arrayID') <- arrayID
+        } else {
+            if(length(seed) > 1L){
+                for (i in 2L:length(seed))
+                    seed[[i]] <- nextRNGStream(seed[[i - 1L]])
+            }
+        }
+        attr(seed, 'iseed') <- iseed
+    }
+    seed
+}
+
+#' Format time string to suitable numeric output
+#'
+#' Format time input string into suitable numeric output metric (e.g., seconds).
+#' Input follows the \code{SBATCH} utility specifications.
+#' Accepted time formats include \code{"minutes"},
+#' \code{"minutes:seconds"}, \code{"hours:minutes:seconds"},
+#' \code{"days-hours"}, \code{"days-hours:minutes"} and
+#' \code{"days-hours:minutes:seconds"}. Alternatively, function can be used to
+#' convert numeric input to SBATCH format.
+#'
+#' For example, \code{time = "60"} indicates a maximum time of 60 minutes,
+#' \code{time = "03:00:00"} a maximum time of 3 hours,
+#' \code{time = "4-12"} a maximum of 4 days and 12 hours, and
+#' \code{time = "2-02:30:00"} a maximum of 2 days, 2 hours and 30 minutes.
+#'
+#' @param time a character string to be formatted. If a numeric vector is supplied
+#' then this will be interpreted as minutes due to character coercion.
+#'
+#' @param output type of numeric output to convert time into.
+#' Currently supported are \code{'sec'} for seconds (default),
+#' \code{'min'} for minutes, \code{'hour'}, and \code{'day'}.
+#'
+#' Alternatively, if \code{time} were numeric then setting \code{output} to
+#' \code{'SBATCH'} will return a suitable SBATCH format.
+#'
+#' @param input if supplied \code{time} is a numeric, indicates what the value
+#'   represents. Default assumes the input is in minutes (see \code{output} for
+#'   supported values)
+#'
+#' @param sround function used to round last seconds computation
+#'
+#' @export
+#'
+#' @examples
+#'
+#' # Test cases (outputs in seconds)
+#' timeFormater("4-12")        # day-hours
+#' timeFormater("4-12:15")     # day-hours:minutes
+#' timeFormater("4-12:15:30")  # day-hours:minutes:seconds
+#'
+#' timeFormater("30")          # minutes
+#' timeFormater("30:30")       # minutes:seconds
+#' timeFormater("4:30:30")     # hours:minutes:seconds
+#'
+#' # output in hours
+#' timeFormater("4-12", output = 'hour')
+#' timeFormater("4-12:15", output = 'hour')
+#' timeFormater("4-12:15:30", output = 'hour')
+#'
+#' timeFormater("30", output = 'hour')
+#' timeFormater("30:30", output = 'hour')
+#' timeFormater("4:30:30", output = 'hour')
+#'
+#' # numeric input is understood as minutes
+#' timeFormater(42)               # seconds
+#' timeFormater(42, output='min') # minutes
+#'
+#' # convert numeric inputs to SBATCH format
+#' timeFormater(60, output='SBATCH')
+#' timeFormater(3, output='SBATCH', input='day')
+#' timeFormater(7000, output='SBATCH', input='sec')
+#' timeFormater(100000, output='SBATCH', input='sec')
+#'
+#' # rounding seconds
+#' timeFormater(1.55555, output='SBATCH', input='sec') # floor default
+#' timeFormater(1.55555, output='SBATCH', input='sec', sround=ceiling)
+#' timeFormater(1.55555, output='SBATCH', input='sec', sround=\(x) round(x, 3))
+#'
+#'
+timeFormater <- function(time, output='sec', input = 'min', sround=floor){
+    if(output == 'SBATCH'){
+        stopifnot(is.numeric(time))
+        return(time2SBATCH(time, input=input, sround=sround))
+    }
+    if(!is.character(time)) time <- as.character(time)
+    stopifnot(length(time) == 1L && length(output) == 1L)
+    stopifnot(output %in% c('sec', 'min', 'hour', 'day'))
+    time <- sbatch_time2sec(time)
+    if(output == 'min') time <- time / 60
+    if(output == 'hour') time <- time / 60 / 60
+    if(output == 'day') time <- time / 60 / 60 / 24
+    time
+}
+
+time2SBATCH <- function(time, input, sround){
+    seconds <- switch(input,
+                   'day'=time*86400,
+                   'hour'=time*3600,
+                   'min'=time*60,
+                   'sec'=time)
+    days <- floor(seconds/86400)
+    remainder <- seconds - days*86400
+    hours <- floor(remainder / 3600)
+    remainder <- remainder - hours * 3600
+    minutes <- floor(remainder / 60)
+    seconds <- sround(remainder - minutes * 60)
+    ret <- sprintf('%s:%s:%s', hours, minutes, seconds)
+    if(days > 0)
+        ret <- paste0(days, '-', ret)
+    ret
+}
+
+sbatch_time2sec <- function(time){
+    ret <- if(is.character(time)){
+        time <- gsub(pattern = " ", "", time)
+        time_vec <- c(days=0, hours=0, mins=0, secs=0)
+        if(grepl("-", time)){ # day format
+            splt <- strsplit(time, "-")[[1L]]
+            time_vec['days'] <- as.numeric(splt[1L])
+            time <- splt[2L]
+            splt <- as.numeric(strsplit(time, ":")[[1L]])
+            time <- if(length(splt) == 1L){
+                sprintf("%f:00:00", splt[1L])
+            } else if(length(splt) == 2L){
+                sprintf("%f:%f:00", splt[1L], splt[2L])
+            } else if(length(splt) == 3L)
+                sprintf("%f:%f:%f", splt[1L], splt[2L], splt[3])
+        }
+        splt <- as.numeric(strsplit(time, ":")[[1L]])
+        time <- if(length(splt) == 1L){
+            sprintf("00:%f:00", splt[1L])
+        } else if(length(splt) == 2L){
+            sprintf("00:%f:%f", splt[1L], splt[2L])
+        } else if(length(splt) == 3L){
+            time
+        } else stop('max_time not correctly specified. Please fix!',
+                    call.=FALSE)
+        splt <- as.numeric(strsplit(time, ":")[[1L]])
+        time_vec[2L:4L] <- splt
+        sum(c(86400, 3600, 60, 1) * time_vec)   # c(24*60*60, 60*60, 60, 1)
+    } else time
+    ret
+}
+
+valid_control.list <- function()
+    c("stop_on_fatal", "warnings_as_errors", "save_seeds", "store_Random.seeds",
+      "store_warning_seeds", "include_replication_index", "include_reps", "try_all_analyse",
+      "allow_na", "allow_nan", "type", "print_RAM", "max_time", "max_RAM",
+      "tol", "summarise.reg_data", "rel.tol", "k.success", "interpolate.R", "bolster",
+      "include_reps", 'global_fun_level', 'useAnalyseHandler', 'max_time.start', 'logging',
+      'use_mirai')
+
+valid_save_details.list <- function()
+    c("safe", "compname", "out_rootdir", "save_results_dirname", "save_results_filename",
+      "save_seeds_dirname", 'arrayID', "tmpfilename")
+
+# Test cases:
+#
+# sbatch_RAM2bytes("1024MB")
+# sbatch_RAM2bytes("4G")
+# sbatch_RAM2bytes("1.5TB")
+
+sbatch_RAM2bytes <- function(RAM){
+    ret <- if(is.character(RAM)){
+        RAM <- gsub(pattern = " ", "", RAM)
+        type <- logical(3L)
+        type[1L] <- grepl('M', RAM)
+        type[2L] <- grepl('G', RAM)
+        type[3L] <- grepl('T', RAM)
+        if(!any(type)) stop('RAM metric must be MB, GB, or TB', call.=FALSE)
+        RAM <- gsub('B', "", RAM)
+        RAM <- as.numeric(gsub('M|G|T', "", RAM))
+        C <- 1000000 # MB2bytes
+        if(type[2L]) C <- C * 1000
+        if(type[3L]) C <- C * 1000000
+        RAM * C
+    } else RAM
+    ret
+}
+
+#' @rdname genSeeds
+#' @param ... does nothing
+gen_seeds <- function(...){
+    .Deprecated('genSeeds')
+    genSeeds(...)
+
+}
+
+add_cbind <- function(lst){
+    len <- sapply(lst, ncol)
+    if(!any(len)) return(lst[[1L]])
+    lst <- lapply(lst, \(x){
+        x[is.na(x)] <- 0
+        x
+    })
+    for(i in 1L:length(lst)){
+        if(length(lst[[i]])){
+            ret <- lst[[i]]
+            if(i == length(lst)) return(ret)
+            break
+        }
+    }
+    from <- i + 1L
+    for(i in from:length(lst)){
+        nms <- colnames(ret)
+        nms2 <- colnames(lst[[i]])
+        matched <- nms %in% nms2
+        if(any(matched)){
+            for(j in 1L:length(nms))
+                if(matched[j])
+                    ret[,nms[j]] <- ret[,nms[j]] + lst[[i]][,nms[j]]
+        }
+        ret <- cbind(ret, lst[[i]][,!(nms2 %in% nms)])
+    }
+    dplyr::as_tibble(ret)
+}
+
+
+#' Read simulation files
+#'
+#' Convenience function that switches between \code{readRDS()} and
+#' \code{qs2::qs_read()} for functions saved with \code{SimDesign}.
+#' By convention, objects saved with the extension \code{.rds} are read
+#' as R binary files and typically reflect the final object from
+#' \code{\link{runSimulation}} or \code{\link{runArraySimulation}},
+#' while files without an extension are read using \code{qs2} (most often
+#' temporary files or results written to an associated sub-directory).
+#'
+#' @export
+#' @return the R binary object
+#' @param filename name of the file to read in
+SimRead <- function(filename){
+    file_ext <- tools::file_ext(filename)
+    tmp <- if(tolower(file_ext) == 'rds')
+        try(readRDS(filename), TRUE)
+    else try(qs2::qd_read(filename), TRUE)
+    tmp
 }

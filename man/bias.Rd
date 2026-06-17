@@ -8,6 +8,8 @@ bias(
   estimate,
   parameter = NULL,
   type = "bias",
+  center = mean,
+  deviance = colSDs,
   abs = FALSE,
   percent = FALSE,
   unname = FALSE
@@ -31,11 +33,24 @@ form (therefore \code{mean(estimate))} will be returned)}
 \item{type}{type of bias statistic to return. Default (\code{'bias'}) computes the standard bias
 (average difference between sample and population), \code{'relative'} computes
 the relative bias statistic (i.e., divide the bias by the value
-in \code{parameter}; note that multiplying this by 100 gives the "percent bias" measure),
-\code{'abs_relative'} computes the relative bias but the absolute values of the parameters
-are used in the denominator rather than the (potentially) signed input values,
+in \code{parameter}; note that multiplying this by 100 gives the "percent bias" measure, or
+if Type I error rates (\eqn{\alpha}) are supplied will result in the "percentage error"),
+\code{'abs_relative'} computes the relative bias for each replication independently, takes the
+absolute value of each term, then computes the mean estimate,
 and \code{'standardized'} computes the standardized bias estimate
 (standard bias divided by the standard deviation of the sample estimates)}
+
+\item{center}{function to compute the central tendency. Default uses \code{\link{mean}},
+reflecting the canonical \eqn{mean(\hat{p}_i - p)} difference,
+ but other options can be supplied to provide more robust central tendency estimates, such as
+\code{\link{median}} or \code{\(x) mean(x, trim = 0.1)}}
+
+\item{deviance}{function to compute the deviance criterion, currently used when
+\code{type = 'standardize'}. Default uses \code{\link{colSDs}},
+reflecting the canonical standard deviation of an incoming \code{matrix} object (required),
+but other options can be supplied to provide more robust deviation estimates, such as
+\code{\(x) apply(x, 2, IQR)} for the interquartile range. Note that if using an alternative
+\code{center} then, if relevant, this should be adjusted too}
 
 \item{abs}{logical; find the absolute bias between the parameters and estimates? This effectively
 just applies the \code{\link{abs}} transformation to the returned result. Default is FALSE}
@@ -62,12 +77,16 @@ samp <- rnorm(100, 2, sd = 0.5)
 bias(samp, pop)
 bias(samp, pop, type = 'relative')
 bias(samp, pop, type = 'standardized')
+bias(samp, pop, type = 'abs_relative')
 
 dev <- samp - pop
 bias(dev)
 
 # equivalent here
 bias(mean(samp), pop)
+
+# different center function
+bias(samp, pop, center=median)  # median instead of mean
 
 # matrix input
 mat <- cbind(M1=rnorm(100, 2, sd = 0.5), M2 = rnorm(100, 2, sd = 1))
@@ -78,6 +97,8 @@ bias(mat, parameter = 2, type = 'standardized')
 # different parameter associated with each column
 mat <- cbind(M1=rnorm(1000, 2, sd = 0.25), M2 = rnorm(1000, 3, sd = .25))
 bias(mat, parameter = c(2,3))
+bias(mat, parameter = c(2,3), type='relative')
+bias(mat, parameter = c(2,3), type='standardized')
 
 # same, but with data.frame
 df <- data.frame(M1=rnorm(100, 2, sd = 0.5), M2 = rnorm(100, 2, sd = 1))
@@ -88,11 +109,17 @@ parameters <- 1:10
 estimates <- parameters + rnorm(10)
 bias(estimates, parameters)
 
+
 # relative difference dividing by the magnitude of parameters
 bias(estimates, parameters, type = 'abs_relative')
 
 # relative bias as a percentage
 bias(estimates, parameters, type = 'abs_relative', percent = TRUE)
+
+# percentage error (PE) statistic given alpha (Type I error) and EDR() result
+# edr <- EDR(results, alpha = .05)
+edr <- c(.04, .05, .06, .08)
+bias(matrix(edr, 1L), .05, type = 'relative', percent = TRUE)
 
 
 }

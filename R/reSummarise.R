@@ -9,7 +9,13 @@
 #' and final collection of the respective results.
 #'
 #' @param summarise a summarise function to apply to the read-in files.
-#'   See \code{\link{runSimulation}} for details
+#'   See \code{\link{runSimulation}} for details.
+#'
+#'   Note that if the simulation contained
+#'   only one row then the new summarise function can be defined as either
+#'   \code{summarise <- function(results, fixed_objects)}, if
+#'   \code{fixed_objects} is required, or
+#'   \code{summarise <- function(results)},
 #'
 #' @param dir directory pointing to the .rds files to be
 #'   read-in that were saved from \code{runSimulation(..., save_results=TRUE)}.
@@ -64,17 +70,17 @@
 #'
 #' Design <- createDesign(N = c(10, 20, 30))
 #'
-#' Generate <- function(condition, fixed_objects = NULL) {
+#' Generate <- function(condition, fixed_objects) {
 #'     dat <- with(condition, rnorm(N, 10, 5)) # distributed N(10, 5)
 #'     dat
 #' }
 #'
-#' Analyse <- function(condition, dat, fixed_objects = NULL) {
+#' Analyse <- function(condition, dat, fixed_objects) {
 #'     ret <- c(mean=mean(dat), median=median(dat)) # mean/median of sample data
 #'     ret
 #' }
 #'
-#' Summarise <- function(condition, results, fixed_objects = NULL){
+#' Summarise <- function(condition, results, fixed_objects){
 #'     colMeans(results)
 #' }
 #'
@@ -89,7 +95,7 @@
 #' res <- reSummarise(Summarise, dir = 'simresults/')
 #' res
 #'
-#' Summarise2 <- function(condition, results, fixed_objects = NULL){
+#' Summarise2 <- function(condition, results, fixed_objects){
 #'     ret <- c(mean_ests=colMeans(results), SE=colSDs(results))
 #'     ret
 #' }
@@ -97,7 +103,7 @@
 #' res2 <- reSummarise(Summarise2, dir = 'simresults/')
 #' res2
 #'
-#' SimClean('simresults/')
+#' SimClean(dir='simresults/')
 #'
 #' }
 #'
@@ -146,23 +152,33 @@ reSummarise <- function(summarise, dir = NULL, files = NULL, results = NULL, Des
     }
     res <- vector('list', length(files))
     conditions <- vector('list', length(files))
+    nargs <- length(formals(args(summarise)))
+    stopifnot(nargs %in% 1:3)
 
     for(i in 1L:length(files)){
         if(read_files){
-            inp <- readRDS(files[i])
+            inp <- SimRead(files[i])
             conditions[[i]] <- inp$condition
-            summ <- try(summarise(condition=inp$condition, results=inp$results,
-                              fixed_objects=fixed_objects))
+            summ <- if(nargs == 3)
+                try(summarise(condition=inp$condition, results=inp$results,
+                                  fixed_objects=fixed_objects))
+            else if(nargs == 2)
+                try(summarise(results=inp$results, fixed_objects=fixed_objects))
+            else try(summarise(inp$results))
             if(is(summ, 'try-error'))
                 stop(sprintf("File \'%s\' threw an error in the summarise() function", files[i]))
         } else {
-            summ <- try(summarise(condition=Design[i,], results=results[[i]],
+            summ <- if(nargs == 3)
+                try(summarise(condition=Design[i,], results=results[[i]],
                                   fixed_objects=fixed_objects))
+            else if(nargs == 2)
+                try(summarise(results=results[[i]], fixed_objects=fixed_objects))
+            else try(summarise(results[[i]]))
             if(is(summ, 'try-error'))
                 stop(sprintf("Results objec \'%s\' threw an error in the summarise() function", files[i]))
         }
 
-        res[[i]] <- try(sim_results_check(summ))
+        res[[i]] <- try(sim_results_check(summ, return_list=TRUE))
         if(is(res[[i]], 'try-error'))
             stop(sprintf("File \'%s\' did not return a valid summarise() output", files[i]))
         if(boot_method != 'none'){
@@ -179,10 +195,29 @@ reSummarise <- function(summarise, dir = NULL, files = NULL, results = NULL, Des
             res[[i]] <- c(res[[i]], CIs)
         }
     }
+    is_list <- FALSE
+    new_sum <- if(!is.list(res[[1]])){
+        do.call(rbind, res)
+    } else {
+        is_list <- TRUE
+        res
+    }
     if(read_files){
-        res <- cbind(dplyr::bind_rows(conditions), do.call(rbind, res))
+        Design <- dplyr::bind_rows(conditions)
+        if(is_list){
+            res <- Design
+            res$SUMMARISE <- new_sum
+        } else {
+            res <- cbind(Design, new_sum)
+        }
         res$REPLICATION <- res$ID <- NULL
-    } else
-        res <- cbind(Design, do.call(rbind, res))
+    } else {
+        if(is_list){
+            res <- Design
+            res$SUMMARISE <- new_sum
+        } else {
+            res <- cbind(Design, new_sum)
+        }
+    }
     dplyr::as_tibble(res)
 }

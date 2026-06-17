@@ -27,7 +27,7 @@
 #'
 #' @aliases Generate
 #'
-#' @seealso \code{\link{add_missing}}, \code{\link{Attach}},
+#' @seealso \code{\link{addMissing}}, \code{\link{Attach}},
 #'   \code{\link{rmgh}}, \code{\link{rValeMaurelli}}, \code{\link{rHeadrick}}
 #' @references
 #'
@@ -42,7 +42,7 @@
 #' @examples
 #' \dontrun{
 #'
-#' generate <- function(condition, fixed_objects = NULL) {
+#' generate <- function(condition, fixed_objects) {
 #'     N1 <- condition$sample_sizes_group1
 #'     N2 <- condition$sample_sizes_group2
 #'     sd <- condition$standard_deviations
@@ -58,7 +58,7 @@
 #' }
 #'
 #' # similar to above, but using the Attach() function instead of indexing
-#' generate <- function(condition, fixed_objects = NULL) {
+#' generate <- function(condition, fixed_objects) {
 #'     Attach(condition)
 #'     N1 <- sample_sizes_group1
 #'     N2 <- sample_sizes_group2
@@ -71,13 +71,13 @@
 #'     dat
 #' }
 #'
-#' generate2 <- function(condition, fixed_objects = NULL) {
+#' generate2 <- function(condition, fixed_objects) {
 #'     mu <- sample(c(-1,0,1), 1)
 #'     dat <- rnorm(100, mu)
 #'     dat        #return simple vector (discard mu information)
 #' }
 #'
-#' generate3 <- function(condition, fixed_objects = NULL) {
+#' generate3 <- function(condition, fixed_objects) {
 #'     mu <- sample(c(-1,0,1), 1)
 #'     dat <- data.frame(DV = rnorm(100, mu))
 #'     dat
@@ -85,7 +85,7 @@
 #'
 #' }
 #'
-Generate <- function(condition, fixed_objects = NULL) NULL
+Generate <- function(condition, fixed_objects) NULL
 
 #=================================================================================================#
 
@@ -126,7 +126,7 @@ Generate <- function(condition, fixed_objects = NULL) NULL
 #'   \code{parameters}). If a \code{data.frame} is returned with more than 1 row then these
 #'   objects will be wrapped into suitable \code{list} objects
 #'
-#' @seealso \code{\link{stop}}, \code{\link{AnalyseIf}}, \code{\link{convertWarnings}}
+#' @seealso \code{\link{stop}}, \code{\link{AnalyseIf}}, \code{\link{manageWarnings}}
 #'
 #' @references
 #'
@@ -142,7 +142,7 @@ Generate <- function(condition, fixed_objects = NULL) NULL
 #' @examples
 #' \dontrun{
 #'
-#' analyse <- function(condition, dat, fixed_objects = NULL) {
+#' analyse <- function(condition, dat, fixed_objects) {
 #'
 #'     # require packages/define functions if needed, or better yet index with the :: operator
 #'     require(stats)
@@ -162,13 +162,13 @@ Generate <- function(condition, fixed_objects = NULL) NULL
 #'
 #' # A more modularized example approach
 #'
-#' analysis_welch <- function(condition, dat, fixed_objects = NULL) {
+#' analysis_welch <- function(condition, dat, fixed_objects) {
 #'     welch <- t.test(DV ~ group, dat)
 #'     ret <- c(p=welch$p.value)
 #'     ret
 #' }
 #'
-#' analysis_ind <- function(condition, dat, fixed_objects = NULL) {
+#' analysis_ind <- function(condition, dat, fixed_objects) {
 #'     ind <- t.test(DV ~ group, dat, var.equal=TRUE)
 #'     ret <- c(p=ind$p.value)
 #'     ret
@@ -178,7 +178,7 @@ Generate <- function(condition, fixed_objects = NULL) NULL
 #' # runSimulation(..., analyse=list(welch=analyse_welch, independent=analysis_ind))
 #'
 #' }
-Analyse <- function(condition, dat, fixed_objects = NULL) NULL
+Analyse <- function(condition, dat, fixed_objects) NULL
 
 
 
@@ -222,7 +222,7 @@ Analyse <- function(condition, dat, fixed_objects = NULL) NULL
 #' @examples
 #' \dontrun{
 #'
-#' summarise <- function(condition, results, fixed_objects = NULL) {
+#' summarise <- function(condition, results, fixed_objects) {
 #'
 #'     #find results of interest here (alpha < .1, .05, .01)
 #'     lessthan.05 <- EDR(results, alpha = .05)
@@ -234,7 +234,7 @@ Analyse <- function(condition, dat, fixed_objects = NULL) NULL
 #'
 #' }
 #'
-Summarise <- function(condition, results, fixed_objects = NULL) NULL
+Summarise <- function(condition, results, fixed_objects) NULL
 
 
 #=================================================================================================#
@@ -277,15 +277,16 @@ Summarise <- function(condition, results, fixed_objects = NULL) NULL
 # print(SimDesign::main)
 #
 # }
-mainsim <- function(index, condition, generate, analyse, fixed_objects, max_errors, save_results_out_rootdir,
-                    save, allow_na, allow_nan, save_seeds, save_seeds_dirname, load_seed,
-                    warnings_as_errors, store_warning_seeds, use_try, include_replication_index,
-                    p = NULL, future = FALSE, allow_gen_errors = TRUE){
+mainsim <- function(index, condition, condition.row, generate, analyse, fixed_objects, max_errors, save_results_out_rootdir,
+                    save, allow_na, allow_nan, save_seeds, save_seeds_dirname, load_seed, max_time, max_time.start,
+                    warnings_as_errors, store_Random.seeds, store_warning_seeds, use_try, include_replication_index,
+                    useGenerate, useAnalyseHandler, logging, p = NULL, future = FALSE, allow_gen_errors = TRUE){
 
     if(!is.null(p)) p(sprintf("replication = %g", index))
     if(include_replication_index) condition$REPLICATION <- index
     try_error <- try_error_seeds <- warning_message_seeds <- NULL
 
+    generate_time <- analyse_time <- 0
     while(TRUE){
 
         Warnings <- NULL
@@ -307,10 +308,13 @@ mainsim <- function(index, condition, generate, analyse, fixed_objects, max_erro
         }
         if(!is.null(load_seed))
             .GlobalEnv$.Random.seed <- load_seed
-        simlist <- if(allow_gen_errors)
-            try(withCallingHandlers(generate(condition=condition,
-                                                        fixed_objects=fixed_objects), warning=wHandler), TRUE)
-        else generate(condition=condition, fixed_objects=fixed_objects)
+        start_time <- proc.time()[3L]
+        simlist <- if(useGenerate){
+            if(allow_gen_errors)
+                try(withCallingHandlers(generate(condition=condition,
+                                                            fixed_objects=fixed_objects), warning=wHandler), TRUE)
+            else generate(condition=condition, fixed_objects=fixed_objects)
+        } else NA
         if(!use_try){
             if(is(simlist, 'try-error')){
                 .GlobalEnv$.Random.seed <- current_Random.seed
@@ -335,8 +339,18 @@ mainsim <- function(index, condition, generate, analyse, fixed_objects, max_erro
             try_error_seeds <- rbind(try_error_seeds, current_Random.seed)
             next
         }
-        res <- try(withCallingHandlers(analyse(dat=simlist, condition=condition,
-                           fixed_objects=fixed_objects), warning=wHandler), silent=TRUE)
+        end_time <- proc.time()[3L]
+        generate_time <- generate_time + (end_time - start_time)
+        start_time <- end_time
+        res <- if(useAnalyseHandler)
+            try(withCallingHandlers(analyse(dat=simlist, condition=condition,
+                               fixed_objects=fixed_objects), warning=wHandler), silent=TRUE)
+        else try(analyse(dat=simlist, condition=condition,
+                         fixed_objects=fixed_objects), silent=TRUE)
+        if(!valid_results(res))
+            stop("Invalid object returned from Analyse()", call.=FALSE)
+        end_time <- proc.time()[3L]
+        analyse_time <- analyse_time + (end_time - start_time)
         if(!use_try){
             if(is(res, 'try-error')){
                 debug(analyse)
@@ -382,7 +396,7 @@ mainsim <- function(index, condition, generate, analyse, fixed_objects, max_erro
                             call.=FALSE), silent=TRUE)
         }
 
-        # if an error was detected in compute(), try again
+        # if an error was detected in analyse(), try again
         if(is(res, 'try-error')){
             res[1L] <-
                 gsub('Error in analyse\\(dat = simlist, condition = condition, fixed_objects = fixed_objects) : \\n  ',
@@ -408,10 +422,33 @@ mainsim <- function(index, condition, generate, analyse, fixed_objects, max_erro
             rownames(try_error_seeds) <- try_error
         if(store_warning_seeds)
             rownames(warning_message_seeds) <- Warnings
+        if(store_Random.seeds)
+            attr(res, 'current_Random.seed') <- current_Random.seed
+        attr(res, 'generate_analyse_time') <-
+            unname(c(generate_time, analyse_time))
+        if(logging == 'verbose')
+            cat(sprintf("\nDesign row: %s, Replication: %i \n Time: generate = %s, analyse = %s",
+                condition.row, index,
+                timeFormater(generate_time, output='SBATCH', input='sec'),
+                timeFormater(analyse_time, output='SBATCH', input='sec')))
         attr(res, 'try_errors') <- try_error
         attr(res, 'try_error_seeds') <- try_error_seeds
         attr(res, 'warnings') <- Warnings
         attr(res, 'warning_message_seeds') <- warning_message_seeds
         return(res)
     }
+}
+
+mainsim_maxtime <- function(max_time, max_time.start, ...){
+    st <- proc.time()['elapsed']
+    time_left <- max_time - (st - max_time.start)
+    if(time_left <= 0){
+        out <- NA
+        class(out) <- 'timed_out'
+        return(out)
+    }
+    out <- R.utils::withTimeout(mainsim(...),
+                                timeout = time_left,
+                                onTimeout = 'warning')
+    out
 }

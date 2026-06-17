@@ -14,6 +14,7 @@ SimFunctions(
   summarise = TRUE,
   comments = FALSE,
   openFiles = TRUE,
+  clip = FALSE,
   spin_header = TRUE,
   SimSolve = FALSE
 )
@@ -28,12 +29,12 @@ is generally the recommended approach when beginning to write a Monte Carlo simu
 \item{save_structure}{character indicating the number of files to break the simulation code into
 when \code{filename} is included (default is 'single' for one file). When \code{save_structure = 'double'} the
 output is saved to two separate files containing the functions and design definitions,
-and when \code{save_structure = 'all'} the generate, analyse, summarise, and execution code area all saved into
-separate files. The purpose for this structure is because multiple structured files
-often makes organization and debugging slightly easier larger Monte Carlo simulations, though in principle
-all files could be stored into a single R script}
+and when \code{save_structure = 'all'} the generate, analyse, summarise, and execution code are all saved into
+separate files. The purpose of this structure is because multiple structured files
+often makes organization and debugging slightly easier for larger Monte Carlo simulations, though, in principle,
+all files could be stored in a single R script}
 
-\item{extra_file}{logical; should and extra file be saved containing user-defined functions or objects?
+\item{extra_file}{logical; should an extra file be saved containing user-defined functions or objects?
 Default is \code{FALSE}}
 
 \item{nAnalyses}{number of analysis functions to create (default is 1). Increasing the value
@@ -54,6 +55,9 @@ step can be defined in the analysis function(s) (only recommended for smaller si
 \item{openFiles}{logical; after files have been generated, open them in your text editor
 (e.g., if Rstudio is running the scripts will open in a new tab)?}
 
+\item{clip}{logical; use the `clipr` package to copy the simulation template to the
+OS clipboard?}
+
 \item{spin_header}{logical; include a basic \code{knitr::spin} header to allow the simulation
 to be knitted? Default is \code{TRUE}. For those less familiar with \code{spin} documents
 see \code{https://bookdown.org/yihui/rmarkdown-cookbook/spin.html} for further details}
@@ -66,7 +70,7 @@ This function prints template versions of the required \code{Design} and Generat
 for \code{SimDesign} to run simulations. Templated output comes complete with the correct inputs,
 class of outputs, and optional comments to help with the initial definitions.
 Use this at the start of your Monte Carlo simulation study. Following
-the definition of the \code{SimDesign} template file please refer to detailed the information
+the definition of the \code{SimDesign} template file please refer to the detailed the information
 in \code{\link{runSimulation}} for how to edit this template to make a working simulation study.
 }
 \details{

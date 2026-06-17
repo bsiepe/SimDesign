@@ -4,3 +4,10 @@
 .Rprofile
 Makefile
 ^\.travis\.yml$
+^_pkgdown\.yml$
+^docs$
+^pkgdown$
+^\.github$
+^dev$
+^\.positai$
+^\.claude$

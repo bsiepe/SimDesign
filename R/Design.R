@@ -1,4 +1,4 @@
-#' Create the simulation Design object
+#' Create the simulation design object
 #'
 #' Create a partially or fully-crossed data object reflecting the unique
 #' simulation design conditions. Each row of the returned object represents
@@ -23,6 +23,9 @@
 #' @param stringsAsFactors logical; should character variable inputs be coerced
 #'   to factors when building a \code{data.frame}? Default is FALSE
 #'
+#' @param fully.crossed logical; create a fully-crossed design object? Setting to \code{FALSE}
+#'   will attempt to combine the design elements column-wise via \code{data.frame(...)}
+#'   instead of \code{expand.grid(...)}
 #'
 #' @return a \code{tibble} or \code{data.frame} containing the simulation experiment
 #'   conditions to be evaluated in \code{\link{runSimulation}}
@@ -36,6 +39,8 @@
 #' Sigal, M. J., & Chalmers, R. P. (2016). Play it again: Teaching statistics with Monte
 #' Carlo simulation. \code{Journal of Statistics Education, 24}(3), 136-156.
 #' \doi{10.1080/10691898.2016.1246953}
+#'
+#' @seealso \code{\link{expandDesign}}
 #'
 #' @export
 #'
@@ -70,6 +75,13 @@
 #' Design
 #' print(Design, list2char = FALSE)   # standard tibble output
 #'
+#' # design without crossing (inputs taken-as is)
+#' Design <- createDesign(N = c(10, 20),
+#'                        SD = c(1, 2), cross=FALSE)
+#' Design   # only 2 rows
+#'
+#' ##########
+#'
 #' ## fractional factorial example
 #'
 #' library(FrF2)
@@ -95,7 +107,7 @@
 #'
 #' }
 createDesign <- function(..., subset, fractional = NULL,
-                         tibble = TRUE, stringsAsFactors = FALSE){
+                         tibble = TRUE, stringsAsFactors = FALSE, fully.crossed = TRUE){
     dots <- list(...)
     if(any(sapply(dots, is, class2='data.frame') | sapply(dots, is, class2='tibble')))
         stop('data.frame/tibble design elements not supported; please use a list input instead',
@@ -113,7 +125,10 @@ createDesign <- function(..., subset, fractional = NULL,
         }
         colnames(ret) <- names(dots[[1L]])
     } else {
-        ret <- expand.grid(..., stringsAsFactors = stringsAsFactors)
+        ret <- if(fully.crossed)
+            expand.grid(..., stringsAsFactors = stringsAsFactors)
+        else
+            data.frame(..., stringsAsFactors = stringsAsFactors)
     }
     if (!missing(subset)){
         e <- substitute(subset)
@@ -126,7 +141,157 @@ createDesign <- function(..., subset, fractional = NULL,
     if(any(pick))
         ret[,pick] <- as.numeric(ret[,pick])
     if(tibble) ret <- dplyr::as_tibble(ret)
+    attr(ret, 'Design.ID') <- 1L:nrow(ret)
     class(ret) <- c('Design', class(ret))
+    ret
+}
+
+#' Expand the replications to match \code{expandDesign}
+#'
+#' Expands the replication budget to match the \code{\link{expandDesign}}
+#' structure.
+#'
+#' @param replications number of replications. Can be a scalar to reflect the same
+#' replications overall, or a vector of unequal replication budgets.
+#'
+#' @param repeat_conditions integer vector used to repeat each design row
+#'   the specified number of times. Can either be a single integer, which repeats
+#'   each row this many times, or an integer vector equal to the number of total
+#'   rows in the created object.
+#'
+#' @return an integer vector of the replication budget matching
+#' the expanded structure in \code{\link{expandDesign}}
+#'
+#' @seealso \code{\link{expandDesign}}
+#'
+#' @references
+#'
+#' Chalmers, R. P., & Adkins, M. C.  (2020). Writing Effective and Reliable Monte Carlo Simulations
+#' with the SimDesign Package. \code{The Quantitative Methods for Psychology, 16}(4), 248-280.
+#' \doi{10.20982/tqmp.16.4.p248}
+#'
+#' Sigal, M. J., & Chalmers, R. P. (2016). Play it again: Teaching statistics with Monte
+#' Carlo simulation. \code{Journal of Statistics Education, 24}(3), 136-156.
+#' \doi{10.1080/10691898.2016.1246953}
+#'
+#' @export
+#'
+#' @author Phil Chalmers \email{rphilip.chalmers@@gmail.com}
+#'
+#' @examples
+#' \dontrun{
+#'
+#' # repeat each row 4 times (for cluster computing)
+#' Design <- createDesign(N = c(10, 20),
+#'                        SD.equal = c(TRUE, FALSE))
+#' Design4 <- expandDesign(Design, 4)
+#' Design4
+#'
+#' # match the replication budget. Target is 1000 replications
+#' (replications4 <- expandReplications(1000, 4))
+#'
+#' # hence, evaluate each row in Design4 250 times
+#' cbind(Design4, replications4)
+#'
+#' ####
+#' # Unequal Design intensities
+#'
+#' Design24 <- createDesign(SD.equal = c(TRUE, FALSE),
+#'                        N = c(10, 100, 1000))
+#' # split first two conditions into half rows, next two conditions into quarters,
+#' #  while N=1000 condition into tenths
+#' expand <- c(2,2,4,4,10,10)
+#' eDesign <- expandDesign(Design, expand)
+#' eDesign
+#'
+#' # target replications is R=1000 per condition
+#' (replications24 <- expandReplications(1000, expand))
+#' cbind(eDesign, replications24)
+#'
+#' }
+expandReplications <- function(replications, repeat_conditions){
+    stopifnot(length(replications) == 1 ||
+                  length(replications) == length(repeat_conditions))
+    if(length(replications) == 1)
+        replications <- rep(replications, length(repeat_conditions))
+    if(length(repeat_conditions) == 1) return(replications/repeat_conditions)
+    replications <- rep(replications/repeat_conditions,
+                        times=repeat_conditions)
+    replications
+}
+
+#' Expand the simulation design object for array computing
+#'
+#' Repeat each design row the specified number of times. This is primarily used
+#' for cluster computing where jobs are distributed with batches of replications
+#' and later aggregated into a complete simulation object
+#' (see \code{\link{runArraySimulation}} and \code{\link{SimCollect}}).
+#'
+#' @param Design object created by \code{\link{createDesign}} which should have
+#'   its rows repeated for optimal HPC schedulers
+#'
+#' @param repeat_conditions integer vector used to repeat each design row
+#'   the specified number of times. Can either be a single integer, which repeats
+#'   each row this many times, or an integer vector equal to the number of total
+#'   rows in the created object.
+#'
+#'   This argument is useful when distributing independent row conditions to
+#'   cluster computing environments, particularly with different \code{replication}
+#'   information. For example, if 1000 replications in total are the target but
+#'   the condition is repeated over 4 rows then only 250 replications per row
+#'   would be required across the repeated conditions. See
+#'   \code{\link{SimCollect}} for combining the simulation objects
+#'   once complete
+#'
+#' @return a \code{tibble} or \code{data.frame} containing the simulation experiment
+#'   conditions to be evaluated in \code{\link{runSimulation}}
+#'
+#' @seealso \code{\link{expandReplications}},
+#'   \code{\link{createDesign}}, \code{\link{SimCollect}},
+#'    \code{\link{runArraySimulation}}
+#'
+#' @references
+#'
+#' Chalmers, R. P., & Adkins, M. C.  (2020). Writing Effective and Reliable Monte Carlo Simulations
+#' with the SimDesign Package. \code{The Quantitative Methods for Psychology, 16}(4), 248-280.
+#' \doi{10.20982/tqmp.16.4.p248}
+#'
+#' Sigal, M. J., & Chalmers, R. P. (2016). Play it again: Teaching statistics with Monte
+#' Carlo simulation. \code{Journal of Statistics Education, 24}(3), 136-156.
+#' \doi{10.1080/10691898.2016.1246953}
+#'
+#' @export
+#'
+#' @author Phil Chalmers \email{rphilip.chalmers@@gmail.com}
+#'
+#' @examples
+#' \dontrun{
+#'
+#' # repeat each row 4 times (for cluster computing)
+#' Design <- createDesign(N = c(10, 20),
+#'                        SD.equal = c(TRUE, FALSE))
+#' Design4 <- expandDesign(Design, 4)
+#' Design4
+#'
+#' # repeat first two rows 2x and the rest 4 times (for cluster computing
+#' #   where first two conditions are faster to execute)
+#' Design <- createDesign(SD.equal = c(TRUE, FALSE),
+#'                        N = c(10, 100, 1000))
+#' Design24 <- expandDesign(Design, c(2,2,rep(4, 4)))
+#' Design24
+#'
+#' }
+expandDesign <- function(Design, repeat_conditions){
+    stopifnot(!missing(Design))
+    stopifnot(!missing(repeat_conditions))
+    if(length(repeat_conditions) == 1L)
+        repeat_conditions <- rep(repeat_conditions, nrow(Design))
+    stopifnot("length of repeat_rows must equal number of rows in final object"=
+                  length(repeat_conditions) == nrow(Design))
+    rep_vec <- rep(1L:nrow(Design), times=repeat_conditions)
+    ret <- Design[sort(rep_vec), ]
+    attr(ret, 'Design.ID') <- attr(Design, 'Design.ID')[rep_vec]
+    rownames(ret) <- NULL
     ret
 }
 
@@ -137,15 +302,23 @@ createDesign <- function(..., subset, fractional = NULL,
 #'   does not change the original classes of the object, just how they are printed.
 #'   Default is TRUE
 #' @param pillar.sigfig number of significant digits to print. Default is 5
+#' @param show.IDs logical; print the internally stored Design ID indicators?
 #' @export
-print.Design <- function(x, list2char = TRUE, pillar.sigfig = 5, ...){
-    classes <- sapply(x, class)
-    if(list2char && any(classes == 'list') && is(x, 'tbl_df'))
+print.Design <- function(x, list2char = TRUE, pillar.sigfig = 5, show.IDs = FALSE,
+                         ...){
+    cls <- class(x)
+    if(show.IDs){
+        x <- cbind(Design.ID=attr(x, 'Design.ID'), x)
+        class(x) <- cls
+    }
+    classes <- lapply(x, class)
+    if(list2char && any(sapply(classes, is.list)) && is(x, 'tbl_df'))
         x <- list2char(x)
-    classes2 <- sapply(x, class)
+    classes2 <- lapply(x, class)
     class(x) <- class(x)[!(class(x) %in% 'Design')]
     old <- options(pillar.sigfig=pillar.sigfig)
-    printDesign(x, whichlist=  which(classes != classes2), ...)
+    pick <- sapply(1:length(classes), \(i) all(classes[[i]] != classes2[[i]]))
+    printDesign(x, whichlist=  which(pick), ...)
     options(old)
     invisible(NULL)
 }
@@ -168,7 +341,8 @@ cat_line <- function(...) {
     cat(paste0(..., "\n"), sep = "")
 }
 
-printDesign <- function(x, whichlist, ..., n = NULL, width = NULL, n_extra = NULL) {
+printDesign <- function(x, whichlist, ..., show.IDs=TRUE, n = NULL,
+                        width = NULL, n_extra = NULL) {
     ff <- format(x, ..., n = n, width = width, n_extra = n_extra)
     if(length(whichlist)){
         if(grepl("\\[23m", ff[3])){ # for Rstudio formatting
@@ -189,3 +363,42 @@ printDesign <- function(x, whichlist, ..., n = NULL, width = NULL, n_extra = NUL
     cat_line(ff)
     invisible(x)
 }
+
+#' @param x object of class \code{'Design'}
+#' @param i row index
+#' @param j column index
+#' @param drop logical; drop to lower dimension class?
+#' @rdname createDesign
+#' @export
+`[.Design` <- function(x, i, j, ..., drop = FALSE){
+    class(x) <- class(x)[-1]
+    x <- if(missing(i))
+        x[ ,j, drop=drop]
+    else if(missing(j))
+        x[i, , drop=drop]
+    else x[i,j, drop=drop]
+    if(!missing(i))
+        attr(x, 'Design.ID') <- attr(x, 'Design.ID')[i]
+    class(x) <- c('Design', class(x))
+    x
+}
+
+#' @rdname createDesign
+#' @param keep.IDs logical; keep the internal ID variables in the
+#'   \code{Design} objects? Use this when row-binding conditions
+#'   that are matched with previous conditions
+#'   (e.g., when using \code{\link{expandDesign}})
+#' @export
+rbindDesign <- function(..., keep.IDs=FALSE){
+    dots <- list(...)
+    for(i in 1:length(dots))
+        class(dots[[i]]) <- class(dots[[i]])[-1]
+    x <- do.call(rbind, dots)
+    ID <- 1:nrow(x)
+    if(keep.IDs)
+        ID <- do.call(c, lapply(dots, \(x) attr(x, 'Design.ID')))
+    attr(x, 'Design.ID') <- ID
+    class(x) <- c('Design', class(x))
+    x
+}
+

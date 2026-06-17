@@ -59,7 +59,7 @@
 #' #~~~~~~~~~~~~~~~~~~~~~~~~
 #' #### Step 2 --- Define generate, analyse, and summarise functions
 #'
-#' Generate <- function(condition, fixed_objects = NULL) {
+#' Generate <- function(condition, fixed_objects) {
 #'     Attach(condition)
 #'     group1 <- rnorm(N)
 #'     group2 <- rnorm(N, mean=d)
@@ -68,12 +68,12 @@
 #'     dat
 #' }
 #'
-#' Analyse <- function(condition, dat, fixed_objects = NULL) {
+#' Analyse <- function(condition, dat, fixed_objects) {
 #'     p <- c(p = t.test(DV ~ group, dat, var.equal=TRUE)$p.value)
 #'     p
 #' }
 #'
-#' Summarise <- function(condition, results, fixed_objects = NULL) {
+#' Summarise <- function(condition, results, fixed_objects) {
 #'     ret <- EDR(results, alpha = .05)
 #'     ret
 #' }
@@ -87,7 +87,7 @@
 #'
 #' sim <- runSimulation(design=Design, replications=10,
 #'                      generate=Generate, analyse=Analyse,
-#'                      summarise=Summarise, store_results=TRUE,
+#'                      summarise=Summarise, store_results=TRUE, save=FALSE,
 #'                      progress=FALSE, control=list(print_RAM=FALSE))
 #' sim
 #'
@@ -95,7 +95,7 @@
 #' sum(sim$REPLICATIONS)
 #'
 #' # use the unsummarised results for the SFA, and include p.values < alpha
-#' sim_results <- SimExtract(sim, what = 'results')
+#' sim_results <- SimResults(sim)
 #' sim_results <- within(sim_results, sig <- p < .05)
 #' sim_results
 #'
@@ -128,13 +128,13 @@
 #'
 #' sim2 <- runSimulation(design=Design, replications=100,
 #'                      generate=Generate, analyse=Analyse,
-#'                      summarise=Summarise, store_results=TRUE,
+#'                      summarise=Summarise, store_results=TRUE, save=FALSE,
 #'                      progress=FALSE, control=list(print_RAM=FALSE))
 #' sim2
 #' sum(sim2$REPLICATIONS) # more replications in total
 #'
 #' # use the unsummarised results for the SFA, and include p.values < alpha
-#' sim_results <- SimExtract(sim2, what = 'results')
+#' sim_results <- SimResults(sim2)
 #' sim_results <- within(sim_results, sig <- p < .05)
 #' sim_results
 #'
@@ -168,13 +168,13 @@
 #'
 #' sim3 <- runSimulation(design=Design, replications=50,
 #'                       generate=Generate, analyse=Analyse,
-#'                       summarise=Summarise, store_results=TRUE,
+#'                       summarise=Summarise, store_results=TRUE, save=FALSE,
 #'                       progress=FALSE, control=list(print_RAM=FALSE))
 #' sim3
 #' sum(sim3$REPLICATIONS)
 #'
 #' # use the unsummarised results for the SFA, and include p.values < alpha
-#' sim_results <- SimExtract(sim3, what = 'results')
+#' sim_results <- SimResults(sim3)
 #' sim_results <- within(sim_results, sig <- p < .05)
 #' sim_results
 #'

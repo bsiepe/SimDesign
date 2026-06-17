@@ -1,13 +1,13 @@
 #' One Dimensional Root (Zero) Finding in Simulation Experiments
 #'
-#' This function provides a stochastic root-finding approach to solving
+#' Provides a stochastic root-finding approach to solve
 #' specific quantities in simulation experiments (e.g., solving for a specific
 #' sample size to meet a target power rate) using the
 #' Probablistic Bisection Algorithm with Bolstering and Interpolations
-#' (ProBABLI; Chalmers, in review). The structure follows the
-#' steps outlined in \code{\link{runSimulation}}, however portions of
+#' (ProBABLI; Chalmers, 2024). The structure follows the
+#' three functional steps outlined in \code{\link{runSimulation}}, however portions of
 #' the \code{design} input are taken as variables to be estimated rather than
-#' fixed, and the constant \code{b} is required in order to
+#' fixed, where an additional constant \code{b} is required in order to
 #' solve the root equation \code{f(x) - b = 0}.
 #'
 #' Root finding is performed using a progressively bolstered version of the
@@ -18,39 +18,47 @@
 #' associated root via interpolation. If interpolations fail, then the last
 #' iteration of the PBA search is returned as the best guess.
 #'
+#' For greater advertised accuracy with ProBABLI, termination criteria
+#' can be based on the width of the advertised predicting interval
+#' (via \code{predCI.tol}) or by specifying how long the investigator
+#' is willing to wait for the final estimates (via \code{wait.time},
+#' where longer wait times lead to progressively better accuracy in
+#' the final estimates).
+#'
 #' @param design a \code{tibble} or \code{data.frame} object containing
 #'   the Monte Carlo simulation conditions to be studied, where each row
-#'   represents a unique condition and each column a factor  to be varied
-#'   (see also \code{\link{createDesign}}). However, exactly one column of this
-#'   object must be specified with \code{NA} placeholders to indicate
-#'   that the missing value should be solved via the stochastic optimizer
+#'   represents a unique condition and each column a factor to be varied
+#'   (see \code{\link{createDesign}}). However, exactly one column of this
+#'   object in each row must be specified with \code{NA} placeholders to indicate
+#'   that the missing value should be estimated via the select
+#'   stochastic optimizer
 #'
 #' @param b a single constant used to solve the root equation \code{f(x) - b = 0}
 #'
-#' @param replications a named list or vector indicating the number of replication to
+#' @param replications a named \code{list} or \code{vector}
+#'   indicating the number of replication to
 #'   use for each design condition per PBA iteration. By default the input is a
 #'   \code{list} with the arguments \code{burnin.iter = 15L}, specifying the number
-#'   of burn-in iterations to used, \code{burnin.reps = 100L} to indicate how many
+#'   of burn-in iterations to used, \code{burnin.reps = 50L} to indicate how many
 #'   replications to use in each burn-in iteration, \code{max.reps = 500L} to
 #'   prevent the replications from increasing higher than this number,
 #'   \code{min.total.reps = 9000L} to avoid termination when very few replications
 #'   have been explored (lower bound of the replication budget),
 #'   and \code{increase.by = 10L} to indicate how many replications to increase
-#'   after the burn-in stage. Unless otherwise specified these defaults will
-#'   be used, but can be overwritten by explicit definition (e.g.,
-#'   \code{replications = list(increase.by = 25L)})
+#'   per iteration after the burn-in stage. Default can overwritten by explicit definition (e.g.,
+#'   \code{replications = list(increase.by = 25L)}).
 #'
-#'   Vector inputs can specify the exact replications
-#'   for each iterations. As a general rule, early iterations
+#'   Vector inputs can specify the exact replications  for each respective
+#'   iteration. As a general rule, early iterations
 #'   should be relatively low for initial searches to avoid unnecessary computations
-#'   for locating the approximate root, though the number of replications should
-#'   gradually increase to reduce the sampling variability as the PBA approaches
-#'   the root.
+#'   when locating the approximate location of the root,
+#'   while the number of replications should gradually increase after this burn-in
+#'   to reduce the sampling variability.
 #'
 #' @param method optimizer method to use. Default is the stochastic root-finder
 #'   \code{'ProBABLI'}, but can also be the deterministic options \code{'Brent'}
 #'   (which uses the function \code{\link{uniroot}}) or \code{'bisection'}
-#'   (for the classical bisection method). If using deterministic root-finders then
+#'   for the classical bisection method. If using deterministic root-finders then
 #'   \code{replications} must either equal a single constant to reflect
 #'   the number of replication to use per deterministic iteration or be a
 #'   vector of length \code{maxiter} to indicate the replications to use per
@@ -61,21 +69,21 @@
 #' @param analyse analysis function. See \code{\link{runSimulation}}
 #'
 #' @param summarise summary function that returns a single number corresponding
-#'   to a function evaluation \code{f(x)} in the equation
+#'   to the function evaluation \code{f(x)} in the equation
 #'   \code{f(x) = b} to be solved as a root \code{f(x) - b = 0}.
 #'   Unlike in the standard \code{runSimulation()} definitions this input
 #'   is required. For further information on this function specification,
 #'   see \code{\link{runSimulation}}
 #'
-#' @param interval a vector of length two, or matrix with \code{nrow(design)}
-#'   and two columns, containing the end-points of the interval to be searched.
+#' @param interval a \code{vector} of length two, or \code{matrix} with
+#'   \code{nrow(design)} rows and two columns, containing the end-points
+#'   of the interval to be searched per row condition.
 #'   If a vector then the interval will be used for all rows in the supplied
-#'   \code{design} object
+#'   \code{design} object when passed to the \code{\link{PBA}} engine
 #'
 #' @param integer logical; should the values of the root be considered integer
 #'   or numeric? If \code{TRUE} then bolstered directional decisions will be
-#'   made in the \code{pba} function based on the collected sampling history
-#'   throughout the search
+#'   made in the \code{\link{PBA}} function based on the collected sampling history
 #'
 #' @param save logical; store temporary file in case of crashes. If detected
 #'   in the working directory will automatically be loaded to resume (see
@@ -98,25 +106,39 @@
 #'   model-based prediction of target \code{b} given the root input estimate.
 #'   Returned as an element in the \code{summary()} list output
 #'
-#' @param control a \code{list} of the algorithm control parameters. If not specified,
-#'   the defaults described below are used.
+#' @param predCI.tol (optional) rather than relying on the changes between successive
+#'   estimates (default), if the predicting CI is consistently within this
+#'   supplied tolerance range then the search will be terminated.
+#'   This provides termination behaviour based on the predicted
+#'   precision of the root solutions rather than their stability history, and therefore
+#'   can be used to obtain estimates with a particular level of advertised accuracy.
+#'   For example, when solving for a sample size value (\code{N}) if the solution
+#'   associated with  \code{b = .80} requires that the advertised 95% prediction CI
+#'   is consistently between [.795, .805] then \code{predCI.tol = .01} should be
+#'   used to reflect this tolerance range
 #'
 #' @param wait.time (optional) argument passed to \code{\link{PBA}} to indicate
-#'   the time to wait (specified in minutes) per row in the \code{Design} object
+#'   the time to wait (specified in minutes if a numeric vector is passed)
+#'   per row in the \code{Design} object
 #'   rather than using pre-determined termination criteria based on the estimates.
 #'   For example, if three three conditions were defined in
-#'   \code{Design}, and \code{wait.time=5},
+#'   \code{Design}, and \code{wait.time="5"},
 #'   then the total search time till terminate after 15 minutes regardless of
-#'   independently specified termination criteria in \code{control}. Note that
-#'   \code{maxiter} is still used alongside \code{wait.time}, therefore this should
-#'   be increased as well (e.g., to \code{maxiter = 1000})
+#'   independently specified termination criteria in \code{control}. See
+#'   \code{\link{timeFormater}} for alternative specifications
+#'
+#' @param lastSolve stub for \code{Spower} package; not to be used by
+#'   front-end users
+#'
+#' @param control a \code{list} of the algorithm control parameters. If not specified,
+#'   the defaults described below are used.
 #'
 #' \describe{
 #'    \item{\code{tol}}{tolerance criteria for early termination (.1 for
 #'      \code{integer = TRUE} searches; .00025 for non-integer searches}
 #'    \item{\code{rel.tol}}{relative tolerance criteria for early termination (default .0001)}
-#'    \item{\code{k.success}}{number of consecutive tolerance success given \code{rel.tol} and
-#'      \code{tol} criteria. Consecutive failures add -1 to the counter (default is 3)}
+#'    \item{\code{k.success}}{number of consecutive tolerance successes given \code{rel.tol} and
+#'      \code{tol} criteria (default is 3)}
 #'    \item{\code{bolster}}{logical; should the PBA evaluations use bolstering based on previous
 #'      evaluations? Default is \code{TRUE}, though only applicable when \code{integer = TRUE} }
 #'    \item{\code{interpolate.R}}{number of replications to collect prior to performing
@@ -125,8 +147,9 @@
 #'      interpolation computations}
 #'    \item{\code{include_reps}}{logical; include a column in the \code{condition}
 #'      elements to indicate how many replications are currently being evaluated? Mainly
-#'      useful when further precision tuning within each ProBABLI iteration is
-#'      desirable (e.g., for bootstrapping). Default is \code{FALSE}}
+#'      useful when further tuning within each ProBABLI iteration is
+#'      desirable (e.g., for increasing/decreasing bootstrap draws as the search progresses).
+#'      Default is \code{FALSE}}
 #'    \item{\code{summarise.reg_data}}{logical; should the aggregate results from \code{Summarise}
 #'      (along with its associated weights) be used for the interpolation steps, or the
 #'      raw data from the \code{Analyse} step? Set this to \code{TRUE} when the individual
@@ -137,7 +160,9 @@
 #      to discard from the interpolation computations. This is included to further
 #      remove the effect of early estimates that are far away from the solution
 #
-#' @param maxiter the maximum number of iterations (default 100)
+#' @param maxiter the maximum number of iterations (default 100) except when
+#'   \code{wait.time} is specified (automatically increased to 3000
+#'   to avoid early termination)
 #'
 #' @param parallel for parallel computing for slower simulation experiments
 #'   (see \code{\link{runSimulation}} for details)
@@ -146,7 +171,10 @@
 #'
 #' @param ncores see \code{\link{runSimulation}}
 #'
-#' @param type type of cluster object to define. If \code{type} used in \code{plot}
+#' @param type type of cluster (see \code{\link[parallel]{makeCluster}})
+#'   or plotting type to use.
+#'
+#'   If \code{type} used in \code{plot}
 #'   then can be \code{'density'} to plot the density of the iteration history
 #'   after the burn-in stage, \code{'iterations'} for a bubble plot with inverse
 #'   replication weights. If not specified then the default PBA
@@ -158,11 +186,11 @@
 #' @param family \code{family} argument passed to \code{\link{glm}}. By default
 #'   the \code{'binomial'} family is used, as this function defaults to power
 #'   analysis setups where isolated results passed to \code{summarise} will
-#'   return 0/1s, however other families should be used had \code{summarise}
-#'   returned something else (e.g., if solving for a particular standard error
+#'   return 0/1s, however other families should be used if \code{summarise}
+#'   returns something else (e.g., if solving for a particular standard error
 #'   then a \code{'gaussian'} family would be more appropriate).
 #'
-#'   Note that if individual  results from the \code{analyse} steps should
+#'   Note that if individual results from the \code{analyse} steps should
 #'   not be used (i.e., only the aggregate from \code{summarise} is meaningful)
 #'   then set \code{control = list(summarise.reg_data = TRUE)} to override the default
 #'   behaviour, thereby using only the aggregate information and weights
@@ -172,13 +200,19 @@
 #' @return the filled-in \code{design} object containing the associated lower and upper interval
 #'   estimates from the stochastic optimization
 #'
+#' @importFrom utils flush.console
+#'
 #' @seealso \code{\link{SFA}}
 #'
 #' @export
 #'
 #' @references
 #'
-#' Chalmers, R. P., & Adkins, M. C.  (2020). Writing Effective and Reliable Monte Carlo Simulations
+#'
+#' Chalmers, R. P. (2024). Solving Variables with Monte Carlo Simulation Experiments: A
+#' Stochastic Root-Solving Approach. \code{Psychological Methods}. DOI: 10.1037/met0000689
+#'
+#' Chalmers, R. P., & Adkins, M. C. (2020). Writing Effective and Reliable Monte Carlo Simulations
 #' with the SimDesign Package. \code{The Quantitative Methods for Psychology, 16}(4), 248-280.
 #' \doi{10.20982/tqmp.16.4.p248}
 #'
@@ -215,7 +249,7 @@
 #' #~~~~~~~~~~~~~~~~~~~~~~~~
 #' #### Step 2 --- Define generate, analyse, and summarise functions
 #'
-#' Generate <- function(condition, fixed_objects = NULL) {
+#' Generate <- function(condition, fixed_objects) {
 #'     Attach(condition)
 #'     group1 <- rnorm(N)
 #'     group2 <- rnorm(N, mean=d)
@@ -224,12 +258,12 @@
 #'     dat
 #' }
 #'
-#' Analyse <- function(condition, dat, fixed_objects = NULL) {
+#' Analyse <- function(condition, dat, fixed_objects) {
 #'     p <- t.test(DV ~ group, dat, var.equal=TRUE)$p.value
 #'     p
 #' }
 #'
-#' Summarise <- function(condition, results, fixed_objects = NULL) {
+#' Summarise <- function(condition, results, fixed_objects) {
 #'     # Must return a single number corresponding to f(x) in the
 #'     # root equation f(x) = b
 #'
@@ -240,11 +274,11 @@
 #' #~~~~~~~~~~~~~~~~~~~~~~~~
 #' #### Step 3 --- Optimize N over the rows in design
 #'
-#' # (For debugging) may want to see if simulation code works as intended first
-#' # for some given set of inputs
-#' runSimulation(design=createDesign(N=100, d=.8, sig.level=.05),
-#'               replications=10, generate=Generate, analyse=Analyse,
-#'               summarise=Summarise)
+#' ### (For debugging) may want to see if simulation code works as intended first
+#' ### for some given set of inputs
+#' # runSimulation(design=createDesign(N=100, d=.8, sig.level=.05),
+#' #              replications=10, generate=Generate, analyse=Analyse,
+#' #              summarise=Summarise)
 #'
 #' # Initial search between N = [10,500] for each row using the default
 #'    # integer solver (integer = TRUE). In this example, b = target power
@@ -280,35 +314,46 @@
 #' pwr.t.test(d=.5, n=N[2])
 #' pwr.t.test(d=.8, n=N[3])
 #'
-#' # failing analytic formula, confirm results with more precise
-#' #  simulation via runSimulation()
-#' #  (not required, if accuracy is important then ProBABLI should be run longer)
-#' csolved <- solved
-#' csolved$N <- ceiling(solved$N)
-#' confirm <- runSimulation(design=csolved, replications=10000, parallel=TRUE,
-#'                          generate=Generate, analyse=Analyse,
-#'                          summarise=Summarise)
-#' confirm
+#' ### failing analytic formula, confirm results with more precise
+#' ###  simulation via runSimulation()
+#' ###  (not required, if accuracy is important then ProBABLI should be run longer)
+#' # csolved <- solved
+#' # csolved$N <- ceiling(solved$N)
+#' # confirm <- runSimulation(design=csolved, replications=10000, parallel=TRUE,
+#' #                         generate=Generate, analyse=Analyse,
+#' #                         summarise=Summarise)
+#' # confirm
 #'
-#' # Alternatively, and more realistically, the wait.time argument can be used
+#' # Similarly, terminate if the prediction interval is consistently predicted
+#' #   to be between [.795, .805]. Note that maxiter increased as well
+#' solved_predCI <- SimSolve(design=Design, b=.8, interval=c(10, 500),
+#'                      generate=Generate, analyse=Analyse, summarise=Summarise,
+#'                      maxiter=200, predCI.tol=.01)
+#' solved_predCI
+#' summary(solved_predCI) # note that predCI.b are all within [.795, .805]
+#'
+#' N <- solved_predCI$N
+#' pwr.t.test(d=.2, n=N[1])
+#' pwr.t.test(d=.5, n=N[2])
+#' pwr.t.test(d=.8, n=N[3])
+#'
+#' # Alternatively, and often more realistically, wait.time can be used
 #' # to specify how long the user is willing to wait for a final estimate.
 #' # Solutions involving more iterations will be more accurate,
 #' # and therefore it is recommended to run the ProBABLI root-solver as long
 #' # the analyst can tolerate if the most accurate estimates are desired.
-#' # Below executes the simulation for 2 minutes for each condition up
-#' # to a maximum of 1000 iterations, terminating based on whichever occurs first
+#' # Below executes the simulation for 2 minutes per condition
 #'
-#' solved_2min <- SimSolve(design=Design, b=.8, interval=c(10, 500),
+#' solved_2min <- SimSolve(design=Design[1, ], b=.8, interval=c(10, 500),
 #'                 generate=Generate, analyse=Analyse, summarise=Summarise,
-#'                 wait.time=2, maxiter=1000)
+#'                 wait.time="2")
 #' solved_2min
 #' summary(solved_2min)
 #'
 #' # use estimated N results to see how close power was
 #' N <- solved_2min$N
 #' pwr.t.test(d=.2, n=N[1])
-#' pwr.t.test(d=.5, n=N[2])
-#' pwr.t.test(d=.8, n=N[3])
+#'
 #'
 #' #------------------------------------------------
 #'
@@ -360,12 +405,13 @@
 #' pwr.t.test(n=50, d = solved$d[2])
 #' pwr.t.test(n=25, d = solved$d[3])
 #'
-#' # failing analytic formula, confirm results with more precise
-#' #  simulation via runSimulation()
-#' confirm <- runSimulation(design=solved, replications=10000, parallel=TRUE,
-#'                          generate=Generate, analyse=Analyse,
-#'                          summarise=Summarise)
-#' confirm
+#' ### failing analytic formula, confirm results with more precise
+#' ###  simulation via runSimulation() (not required; if accuracy is important
+#' ###  PROBABLI should just be run longer)
+#' # confirm <- runSimulation(design=solved, replications=10000, parallel=TRUE,
+#' #                         generate=Generate, analyse=Analyse,
+#' #                         summarise=Summarise)
+#' # confirm
 #'
 #'
 #' #------------------------------------------------
@@ -411,29 +457,42 @@
 #' pwr.t.test(n=50, d = .5, sig.level=solved$sig.level[2])
 #' pwr.t.test(n=50, d = .8, sig.level=solved$sig.level[3])
 #'
-#' # failing analytic formula, confirm results with more precise
-#' #  simulation via runSimulation()
-#' confirm <- runSimulation(design=solved, replications=10000, parallel=TRUE,
-#'                          generate=Generate, analyse=Analyse,
-#'                          summarise=Summarise)
-#' confirm
+#' ### failing analytic formula, confirm results with more precise
+#' ###  simulation via runSimulation() (not required; if accuracy is important
+#' ###  PROBABLI should just be run longer)
+#' # confirm <- runSimulation(design=solved, replications=10000, parallel=TRUE,
+#' #                         generate=Generate, analyse=Analyse,
+#' #                         summarise=Summarise)
+#' # confirm
 #'
 #' }
 SimSolve <- function(design, interval, b, generate, analyse, summarise,
-                     replications = list(burnin.iter = 15L, burnin.reps = 100L,
+                     replications = list(burnin.iter = 15L, burnin.reps = 50L,
                                          max.reps = 500L, min.total.reps = 9000L,
                                          increase.by = 10L),
                      integer = TRUE, formula = y ~ poly(x, 2), family = 'binomial',
                      parallel = FALSE, cl = NULL, save = TRUE, resume = TRUE,
                      method = 'ProBABLI', wait.time = NULL,
-                     ncores = parallel::detectCores() - 1L,
+                     ncores = parallelly::availableCores(omit = 1L),
                      type = ifelse(.Platform$OS.type == 'windows', 'PSOCK', 'FORK'),
                      maxiter = 100L, check.interval = TRUE,
-                     verbose = TRUE, control = list(), predCI = .95, ...){
+                     predCI = .95, predCI.tol = NULL, lastSolve = NULL,
+                     verbose = interactive(),
+                     control = list(), ...){
 
     # robust <- FALSE
+    org.opts <- options()
+    options(warn = 1)
+    on.exit(options(org.opts), add = TRUE)
     if(is.null(control$print_RAM)) control$print_RAM <- FALSE
+    if(is.null(control$global_fun_level)) control$global_fun_level <- 2
     burnin.iter <- 15L
+    if(!is.null(wait.time) && maxiter == 100L){
+        maxiter <- 3000L
+        predCI.tol <- 0
+    }
+    if(!is.null(wait.time) && !is.character(wait.time))
+        wait.time <- as.character(wait.time)
     if(is.list(replications)){
         if(is.null(replications$burnin.iter)) replications$burnin.iter <- burnin.iter else
             burnin.iter <- replications$burnin.iter
@@ -465,7 +524,7 @@ SimSolve <- function(design, interval, b, generate, analyse, summarise,
     if(is.null(control$summarise.reg_data))
         control$summarise.reg_data <- FALSE
     if(is.null(control$rel.tol)) control$rel.tol <- .0001
-    if(is.null(control$k.sucess)) control$k.success <- 3L
+    if(is.null(control$k.success)) control$k.success <- 3L
     if(is.null(control$interpolate.R)) control$interpolate.R <- 3000L
     if(is.null(control$bolster)) control$bolster <- TRUE
     if(is.null(control$include_reps)) control$include_reps <- FALSE
@@ -476,7 +535,7 @@ SimSolve <- function(design, interval, b, generate, analyse, summarise,
     solve_name <- apply(design, 1L, function(x) colnames(design)[is.na(x)])
 
     if(missing(generate) && !missing(analyse))
-        generate <- function(condition, dat, fixed_objects = NULL){}
+        generate <- function(condition, dat, fixed_objects){}
     GENERATE_FUNCTIONS <- generate
     char_functions <- c(deparse(substitute(ANALYSE_FUNCTIONS)),
                              deparse(substitute(GENERATE_FUNCTIONS)))
@@ -511,12 +570,13 @@ SimSolve <- function(design, interval, b, generate, analyse, summarise,
                              generate=generate, analyse=analyse,
                              summarise=summarise, parallel=parallel, cl=cl,
                              save=FALSE, resume=FALSE, verbose=FALSE,
-                             control=.SIMDENV$FromSimSolve$control, ...)
+                             control=.SIMDENV$FromSimSolve$control, ...) |>
+            manageWarnings(suppress="\'package:stats\' may not be available when loading")
         val <- ifelse(is.list(ret), ret[[1L]], ret[1L])
         if(store){
             pick <- min(which(sapply(.SIMDENV$stored_results, is.null)))
             .SIMDENV$stored_results[[pick]] <- ret$summary_results
-            .SIMDENV$stored_medhistory[[pick]] <- x
+            .SIMDENV$stored_medhistory[pick] <- x
             .SIMDENV$stored_history[[pick]] <-
                 data.frame(y=val, x=x, reps=replications)
         }
@@ -539,7 +599,6 @@ SimSolve <- function(design, interval, b, generate, analyse, summarise,
         interval <- matrix(interval, nrow=nrow(design), ncol=2, byrow=TRUE)
     }
     stopifnot(is.matrix(interval))
-    stopifnot(all(interval[,1] < interval[,2]))
     roots <- vector('list', nrow(design))
     .SIMDENV$SimSolveInteger <- integer
     if(is.character(parallel)){
@@ -552,7 +611,7 @@ SimSolve <- function(design, interval, b, generate, analyse, summarise,
             on.exit(parallel::stopCluster(cl), add = TRUE)
         }
     }
-    export_funs <- parent_env_fun()
+    export_funs <- parent_env_fun(control$global_fun_level)
     if(parallel){
         if(!useFuture && is.null(cl)){
             cl <- parallel::makeCluster(ncores, type=type)
@@ -561,32 +620,35 @@ SimSolve <- function(design, interval, b, generate, analyse, summarise,
         if(!useFuture){
             parallel::clusterExport(cl=cl, export_funs, envir = parent.frame(1L))
             parallel::clusterExport(cl=cl, "ANALYSE_FUNCTIONS", envir = environment())
-            if(verbose)
-                message(sprintf("\nNumber of parallel clusters in use: %i", length(cl)))
+            if(verbose > 0 && verbose < 2)
+                message(sprintf("\nNumber of cores used in cluster: %i", length(cl)))
         }
     }
     compname <- Sys.info()['nodename']
     tmpfilename <- paste0('SIMSOLVE-TEMPFILE_', compname, '.rds')
     start <- 1L
     if(resume && file.exists(tmpfilename)){
-        roots <- readRDS(tmpfilename)
+        roots <- SimRead(tmpfilename)
         start <- min(which(sapply(roots, is.null)))
         if(verbose)
             message(paste0('\nContinuing at design row ', start,
                            '. If not intended, terminate and use SimClean()'))
     }
     if(integer){
-        if(!all(as.integer(interval) != interval))
+        if(!all(apply(interval, 1L, function(int)
+            !all(as.integer(int) != int))))
             stop(c('Search interval contains decimals while algorithm is currently',
                    ' using integer=TRUE search'), call.=FALSE)
     }
     for(i in start:nrow(design)){
-        if(verbose){
-            cat(sprintf('\n\n#############\nDesign row %s:\n\n', i))
+        if(verbose && nrow(design) > 1L){
+            if(i > 1L) cat("\n")
+            cat(sprintf('\n#############\nDesign row %s:\n\n', i))
             print(cbind(as.data.frame(design[i,]), b = b))
-            cat("\n")
+            utils::flush.console()
         }
-
+        if(verbose) cat("\n")
+        dots <- list(...)
         .SIMDENV$stored_results <- vector('list', maxiter)
         .SIMDENV$stored_medhistory <- rep(NA, maxiter)
         .SIMDENV$stored_history <- vector('list', maxiter)
@@ -605,7 +667,18 @@ SimSolve <- function(design, interval, b, generate, analyse, summarise,
                                       control=control,
                                       # robust = robust,
                                       predCI = c((1-predCI)/2, predCI + (1-predCI)/2),
-                                      interpolate.burnin=burnin.iter)
+                                      predCI.tol=predCI.tol,
+                                      interpolate.burnin=burnin.iter,
+                                      lastSolve=lastSolve)
+        if(!is.null(lastSolve)){
+            root_info <- attr(lastSolve, 'root')[[1]]
+            len <- length(root_info$stored_results)
+            if(len > maxiter)
+                stop('Please increase maxiter', call.=FALSE)
+            .SIMDENV$stored_results[1:len] <- root_info$stored_results
+            .SIMDENV$stored_history[1:len] <- root_info$stored_history
+        }
+        on.exit(.SIMDENV <- NULL, add=TRUE)
         if(method == 'ProBABLI'){
             roots[[i]] <- try(PBA(root.fun, interval=interval[i, , drop=TRUE], b=b,
                                   design.row=as.data.frame(design[i,]),
@@ -614,9 +687,11 @@ SimSolve <- function(design, interval, b, generate, analyse, summarise,
                                   ...), TRUE)
             if(is(roots[[i]], 'try-error')){
                 is_below <- grepl("*below*", as.character(roots[[i]]))
-                if(is_below || grepl("*above*", as.character(roots[[i]])))
+                if(is_below || grepl("*above*", as.character(roots[[i]]))){
                     roots[[i]] <- list(root=ifelse(is_below, Inf, -Inf))
-                else roots[[i]] <- list(root=NA)
+                } else {
+                    stop(as.character(roots[[i]]), call. = FALSE)
+                }
                 next
             }
         } else if(method == 'Brent'){
@@ -643,11 +718,16 @@ SimSolve <- function(design, interval, b, generate, analyse, summarise,
         tab <- .SIMDENV$stored_history[!sapply(.SIMDENV$stored_history, is.null)]
         if(ReturnSimSolveInternals) return(tab)
         attr(roots[[i]], 'stored_tab') <- if(integer) reduceTable(tab) else tab
-        if(verbose){
+        if(verbose > 0 && verbose < 2){
             cat("\r")
             tmp <- as.data.frame(design[i,])
             cat(sprintf(paste0("\nSolution for %s: %", if(integer) ".1f" else ".3f"),
                 colnames(design)[which(is.na(tmp))], roots[[i]]$root))
+            cat(sprintf(paste0("\n%s%% Prediction Interval: ",
+                               if(integer) "[%.1f, %.1f]" else "[%.3f, %.3f]"),
+                               predCI*100, roots[[i]]$predCIs_root[1], roots[[i]]$predCIs_root[2]))
+            if(verbose && i == nrow(design)) cat("\n\n")
+            flush.console()
         }
         if(save && i < nrow(design)) saveRDS(roots, tmpfilename)
     }
@@ -665,14 +745,14 @@ SimSolve <- function(design, interval, b, generate, analyse, summarise,
 
 #' @rdname SimSolve
 #' @param object object of class \code{'SimSolve'}
-#' @param tab.only logical; print only the (reduce) table of estimates?
-#' @param reps.cutoff integer indicating the rows to omit from output
-#'  if the number of replications do no reach this value
+#' @param tab.only logical; print only the (reduced) table of estimates?
+#' @param reps.cutoff integer indicating the rows to omit from the output
+#'  if the number of replications are less than this value
 #' @export
 summary.SimSolve <- function(object, tab.only = FALSE, reps.cutoff = 300, ...)
 {
     ret <- attr(object, 'roots')
-    if(ret[[1L]]$integer){
+    if(!is.null(ret[[1L]]$integer) && ret[[1L]]$integer){
         stored_tab <- lapply(ret, function(x) attr(x, "stored_tab"))
         stored_tab <- lapply(stored_tab, function(x)
             x[x$reps > reps.cutoff, , drop=FALSE])

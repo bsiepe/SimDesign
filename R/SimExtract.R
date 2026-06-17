@@ -1,21 +1,51 @@
-#' Function to extract extra information from SimDesign objects
+#' Extract extra information from SimDesign objects
 #'
-#' Function used to extract any error or warnings messages, the seeds associated
+#' Extracts any error or warnings messages, the seeds associated
 #' with any error or warning messages, and any analysis results that were stored in the
 #' final simulation object.
 #'
 #' @param object object returned from \code{\link{runSimulation}}
 #'
-#' @param what character indicating what information to extract. Possible inputs
-#'   include \code{'errors'} to return a \code{tibble} object containing counts of any
-#'   error messages, \code{'warnings'} to return a \code{data.frame} object containing
-#'   counts of any warning messages, \code{'error_seeds'} and \code{'warning_seeds'}
-#'   to extract the associated \code{.Random.seed} values associated with the ERROR/WARNING messages,
-#'   \code{'results'} to extract the simulation results if the option \code{store_results} was passed to
-#'   \code{\link{runSimulation}}, \code{'filename'} and \code{'save_results_dirname'} for extracting
-#'   the saved file/directory name information (if used),
-#'   and \code{'summarise'} if the \code{\link{Summarise}}
-#'   definition returned a named \code{list} rather than a named numeric vector.
+#' @param what character vector indicating what information to extract, written in agnostic casing
+#'   (e.g., \code{'ERRORS'} and \code{'errors'} are equivalent). Possible inputs include
+#'
+#'   \describe{
+#'   \item{\code{'errors'}}{to return a \code{tibble} object containing counts of any
+#'   error messages}
+#'
+#'   \item{\code{'warnings'}}{ to return a \code{data.frame} object containing
+#'   counts of any warning messages}
+#'
+#'   \item{\code{'seeds'}}{  for the specified random number
+#'   generation seeds}
+#'
+#'   \item{\code{'Random.seeds'}}{ for the complete list of
+#'   \code{.Random.seed} states across replications (only stored when
+#'   \code{runSimulation(..., control = list(store_Random.seeds=TRUE))})}
+#'
+#'   \item{\code{'log_times'}}{ for the per replication generate/analyse
+#'   execution times (recorded in seconds)}
+#'
+#'   \item{\code{'error_seeds'} and \code{'warning_seeds'}}{
+#'   to extract the associated \code{.Random.seed} values associated with the ERROR/WARNING messages}
+#'
+#'   \item{\code{'prepare_seeds'}}{ to extract the \code{.Random.seed} states captured before
+#'   \code{prepare()} was called for each condition}
+#'
+#'   \item{\code{'prepare_error_seed'}}{ to extract the
+#'   \code{.Random.seed} state when \code{prepare()} encountered an error (useful for debugging with
+#'   \code{load_seed_prepare})}
+#'
+#'   \item{\code{'results'}}{ to extract the simulation results if the option \code{store_results} was passed to
+#'   \code{\link{runSimulation}}},
+#'
+#'   \item{\code{'filename'} and  \code{'save_results_dirname'}}{ for extracting
+#'   the saved file/directory name information (if used), \code{'functions'} to extract the defined functions
+#'   used in the experiment}
+#'
+#'   \item{\code{'design'}}{ to extract the original design object}
+#'
+#'   }
 #'
 #'   Note that \code{'warning_seeds'} are not stored automatically in
 #'   simulations and require passing \code{store_warning_seeds = TRUE} to \code{\link{runSimulation}}.
@@ -26,7 +56,11 @@
 #'   \emph{"System is computationally singular: reciprocal condition number = 2.15321e-16"} are
 #'   effectively the same, and likely should be reported in the same columns of the extracted output
 #'
+#' @param append logical; append the design conditions when extracting error/warning messages?
+#'
 #' @export
+#'
+#' @seealso \code{\link{SimErrors}}, \code{\link{SimWarnings}}
 #'
 #' @references
 #'
@@ -44,66 +78,82 @@
 #'
 #' \dontrun{
 #'
-#' Generate <- function(condition, fixed_objects = NULL) {
+#' Generate <- function(condition, fixed_objects) {
 #'     int <- sample(1:10, 1)
 #'     if(int > 5) warning('GENERATE WARNING: int greater than 5')
-#'     if(int == 1) stop('GENERATE WARNING: integer is 1')
+#'     if(int == 1) stop('GENERATE ERROR: integer is 1')
 #'     rnorm(5)
 #' }
 #'
-#' Analyse <- function(condition, dat, fixed_objects = NULL) {
+#' Analyse <- function(condition, dat, fixed_objects) {
 #'     int <- sample(1:10, 1)
 #'     if(int > 5) warning('ANALYSE WARNING: int greater than 5')
-#'     if(int == 1) stop('ANALYSE WARNING: int is 1')
+#'     if(int == 1) stop('ANALYSE ERROR: int is 1')
 #'     c(ret = 1)
 #' }
 #'
-#' Summarise <- function(condition, results, fixed_objects = NULL) {
+#' Summarise <- function(condition, results, fixed_objects) {
 #'     mean(results)
 #' }
 #'
-#' res <- runSimulation(replications = 100, seed=1234, verbose=FALSE,
+#' res <- runSimulation(replications = 100, seed=1234,
 #'                      generate=Generate, analyse=Analyse, summarise=Summarise)
 #' res
 #'
-#' SimExtract(res, what = 'errors')
-#' SimExtract(res, what = 'warnings')
+#' SimExtract(res, what = 'errors')     # see also SimErrors()
+#' SimExtract(res, what = 'warnings')   # see also SimWarnings()
 #' seeds <- SimExtract(res, what = 'error_seeds')
 #' seeds[,1:3]
 #'
 #' # replicate a specific error for debugging (type Q to exit debugger)
-#' res <- runSimulation(replications = 100, load_seed=seeds[,1], debug='analyse',
+#' res <- runSimulation(replications = 100, load_seed=seeds[,1], debug='analyse-1',
 #'                      generate=Generate, analyse=Analyse, summarise=Summarise)
 #'
 #'
 #'
 #' }
-SimExtract <- function(object, what, fuzzy = TRUE){
+SimExtract <- function(object, what, fuzzy = TRUE, append = TRUE){
     stopifnot(is(object, "SimDesign"))
     what <- tolower(what)
     pick <- attr(object, 'design_names')$design
-    Design <- if(any(pick != 'dummy_run'))
-        object[,attr(object, 'design_names')$design]
+    Design <- if(any(pick != 'dummy_run') &&
+                 all(attr(object, 'design_names')$design %in% names(object)))
+        dplyr::tibble(object[,attr(object, 'design_names')$design], .rows = nrow(object))
         else dplyr::tibble(.rows = nrow(object))
     if(what == 'design') return(Design)
     if(missing(what)) stop('Please specify what you want to extract')
     ret <- if(what == 'results'){
         extract_results(object)
     } else if(what == 'errors'){
-        cbind(Design, extract_errors(object, fuzzy=fuzzy))
-    } else if(what == 'summarise'){
-        extract_summarise(object)
+        err <- extract_errors(object, fuzzy=fuzzy)
+        if(length(err) && append) cbind(Design, err) else err
+    } else if(what == 'functions'){
+        extract_functions(object)
+    }  else if(what == 'seeds'){
+        extract_seeds(object)
+    } else if(what == 'random.seeds'){
+        extract_Random.seeds(object)
     } else if(what == 'error_seeds'){
         extract_error_seeds(object)
     } else if(what == 'warnings'){
-        cbind(Design, extract_warnings(object, fuzzy=fuzzy))
+        wrn <- extract_warnings(object, fuzzy=fuzzy)
+        if(length(wrn) && append) cbind(Design, wrn) else wrn
     } else if(what == 'warning_seeds'){
         extract_warning_seeds(object)
+    } else if(what == 'prepare_seeds'){
+        extract_prepare_seeds(object)
+    } else if(what == 'prepare_error_seed'){
+        extract_prepare_error_seed(object)
     } else if(what == 'save_results_dirname'){
         attr(object, 'extra_info')$save_info['save_results_dirname']
     } else if(what == 'filename'){
         attr(object, 'extra_info')$save_info['filename']
-    } else stop('Input provided to \"what" is not supported')
+    } else if(what == 'log_times'){
+        attr(object, 'extra_info')$log_times
+    } else if(what == 'design.id'){
+        attr(object, 'extra_info')$Design.ID
+    }
+    else stop('Input provided to \"what" is not supported')
     ret
 }
 
@@ -141,6 +191,12 @@ extract_results <- function(object){
     ret
 }
 
+extract_Random.seeds <- function(object){
+    extra_info <- attr(object, 'extra_info')
+    ret <- extra_info$stored_Random.seeds_list
+    ret
+}
+
 extract_error_seeds <- function(object){
     extra_info <- attr(object, 'extra_info')
     ret <- extra_info$error_seeds
@@ -153,17 +209,32 @@ extract_warning_seeds <- function(object){
     ret
 }
 
-extract_summarise <- function(object){
+extract_seeds <- function(object){
     extra_info <- attr(object, 'extra_info')
-    Design <- SimExtract(object, 'Design')
-    nms <- apply(Design, 1L, function(x)
-        paste0(colnames(Design), "=", x, collapse = ' ; '))
-    ret <- extra_info$summarise_list
-    names(ret) <- nms
+    ret <- extra_info$seeds
+    ret
+}
+
+extract_functions <- function(object){
+    extra_info <- attr(object, 'extra_info')
+    ret <- extra_info$functions
+    ret
+}
+
+extract_prepare_seeds <- function(object){
+    extra_info <- attr(object, 'extra_info')
+    ret <- extra_info$prepare_seeds
+    ret
+}
+
+extract_prepare_error_seed <- function(object){
+    extra_info <- attr(object, 'extra_info')
+    ret <- extra_info$prepare_error_seeds
     ret
 }
 
 fuzzy_reduce <- function(df){
+    if(!length(df)) return(df)
     nms <- colnames(df)
     matched <- logical(length(nms))
     unames <- c()

@@ -3,17 +3,24 @@
 \name{createDesign}
 \alias{createDesign}
 \alias{print.Design}
-\title{Create the simulation Design object}
+\alias{[.Design}
+\alias{rbindDesign}
+\title{Create the simulation design object}
 \usage{
 createDesign(
   ...,
   subset,
   fractional = NULL,
   tibble = TRUE,
-  stringsAsFactors = FALSE
+  stringsAsFactors = FALSE,
+  fully.crossed = TRUE
 )
 
-\method{print}{Design}(x, list2char = TRUE, pillar.sigfig = 5, ...)
+\method{print}{Design}(x, list2char = TRUE, pillar.sigfig = 5, show.IDs = FALSE, ...)
+
+\method{[}{Design}(x, i, j, ..., drop = FALSE)
+
+rbindDesign(..., keep.IDs = FALSE)
 }
 \arguments{
 \item{...}{comma separated list of named input objects representing the simulation
@@ -34,7 +41,11 @@ respective \code{...} inputs}
 \item{stringsAsFactors}{logical; should character variable inputs be coerced
 to factors when building a \code{data.frame}? Default is FALSE}
 
-\item{x}{object returned by \code{\link{createDesign}}}
+\item{fully.crossed}{logical; create a fully-crossed design object? Setting to \code{FALSE}
+will attempt to combine the design elements column-wise via \code{data.frame(...)}
+instead of \code{expand.grid(...)}}
+
+\item{x}{object of class \code{'Design'}}
 
 \item{list2char}{logical; for \code{tibble} object re-evaluate list elements
 as character vectors for better printing of the levels? Note that this
@@ -42,6 +53,19 @@ does not change the original classes of the object, just how they are printed.
 Default is TRUE}
 
 \item{pillar.sigfig}{number of significant digits to print. Default is 5}
+
+\item{show.IDs}{logical; print the internally stored Design ID indicators?}
+
+\item{i}{row index}
+
+\item{j}{column index}
+
+\item{drop}{logical; drop to lower dimension class?}
+
+\item{keep.IDs}{logical; keep the internal ID variables in the
+\code{Design} objects? Use this when row-binding conditions
+that are matched with previous conditions
+(e.g., when using \code{\link{expandDesign}})}
 }
 \value{
 a \code{tibble} or \code{data.frame} containing the simulation experiment
@@ -82,6 +106,13 @@ Design <- createDesign(N = c(10, 20),
 Design
 print(Design, list2char = FALSE)   # standard tibble output
 
+# design without crossing (inputs taken-as is)
+Design <- createDesign(N = c(10, 20),
+                       SD = c(1, 2), cross=FALSE)
+Design   # only 2 rows
+
+##########
+
 ## fractional factorial example
 
 library(FrF2)
@@ -115,6 +146,9 @@ with the SimDesign Package. \code{The Quantitative Methods for Psychology, 16}(4
 Sigal, M. J., & Chalmers, R. P. (2016). Play it again: Teaching statistics with Monte
 Carlo simulation. \code{Journal of Statistics Education, 24}(3), 136-156.
 \doi{10.1080/10691898.2016.1246953}
+}
+\seealso{
+\code{\link{expandDesign}}
 }
 \author{
 Phil Chalmers \email{rphilip.chalmers@gmail.com}

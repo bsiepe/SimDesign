@@ -7,7 +7,7 @@
 \title{Probabilistic Bisection Algorithm}
 \usage{
 PBA(
-  f,
+  f.root,
   interval,
   ...,
   p = 0.6,
@@ -20,7 +20,7 @@ PBA(
   resolution = 10000L,
   check.interval = TRUE,
   check.interval.only = FALSE,
-  verbose = TRUE
+  verbose = interactive()
 )
 
 \method{print}{PBA}(x, ...)
@@ -28,10 +28,14 @@ PBA(
 \method{plot}{PBA}(x, type = "posterior", main = "Probabilistic Bisection Posterior", ...)
 }
 \arguments{
-\item{f}{noisy function for which the root is sought}
+\item{f.root}{noisy function for which the root is sought}
 
 \item{interval}{a vector containing the end-points of the interval
-to be searched for the root}
+  to be searched for the root of the form \code{c(lower, upper)}.
+
+  Note that if the interval is specified as \code{c(upper, lower)}, where
+  \code{upper > lower} then it the search will be organized such that increasing
+  the value of the root estimate will result in lower \code{f(x)} values}
 
 \item{...}{additional named arguments to be passed to \code{f}}
 
@@ -50,8 +54,9 @@ latter currently creates a grid with \code{resolution} points}
 
 \item{wait.time}{(optional) instead of terminating after specific estimate criteria
 are satisfied (e.g., \code{tol}), terminate after a specific
-wait time. Input must be a numeric vector indicating the number of minutes to
-wait. Not that users should increase the number of \code{maxiter} as well
+wait time. Input is specified either as a numeric vector in seconds or as a character
+vector to be formatted by \code{\link{timeFormater}}.
+Note that users should increase the number of \code{maxiter} as well
 so that termination can occur if either the maximum iterations are satisfied
 or the specified wait time has elapsed (whichever occurs first)}
 
@@ -132,8 +137,8 @@ plot(retpba.noise)
 plot(retpba.noise, type = 'history')
 
 \dontrun{
-# ignore termination criteria and instead run for 1/2 minutes or 30000 iterations
-retpba.noise_30sec <- PBA(f.root_noisy, c(0,1), wait.time = 1/2, maxiter=30000)
+# ignore termination criteria and instead run for 30 seconds or 50000 iterations
+retpba.noise_30sec <- PBA(f.root_noisy, c(0,1), wait.time = "0:30", maxiter=50000)
 retpba.noise_30sec
 
 }

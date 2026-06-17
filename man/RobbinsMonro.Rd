@@ -15,7 +15,7 @@ RobbinsMonro(
   miniter = 100L,
   k = 3L,
   tol = 1e-05,
-  verbose = TRUE,
+  verbose = interactive(),
   fn.a = function(iter, a = 1, b = 1/2, c = 0, ...) a/(iter + c)^b
 )
 
@@ -67,7 +67,7 @@ console?}
 \item{main}{plot title}
 }
 \description{
-Function performs stochastic root solving for the provided \code{f(x)}
+Performs stochastic root solving for the provided \code{f(x)}
 using the Robbins-Monro (1951) algorithm. Differs from deterministic
 cousins such as \code{\link{uniroot}} in that \code{f} may contain stochastic error
 components, where the root is obtained through the running average method

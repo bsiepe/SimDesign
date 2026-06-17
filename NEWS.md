@@ -1,5 +1,243 @@
 # NEWS file for SimDesign
 
+## Changes in SimDesign 2.25
+
+- Fixed a bug where list-based (L'Ecuyer-CMRG) seeds were not applied on the
+  serial (non-parallel) execution path, causing `runArraySimulation(..., iseed)`
+  and `runSimulation(seed = <genSeeds() list>)` to be non-reproducible when
+  `parallel = FALSE`. The internal `set_seed()` helper was assigning
+  `.Random.seed` to its local frame rather than `.GlobalEnv`, so the RNG state
+  was silently discarded. The parallel path was unaffected
+
+- `SimErrors()` and `SimWarnings()`  functions added to better track and 
+  extract error/warning information. Makes it easier to track down specific 
+  seed states to replicate any of the recorded messages
+
+- Default cluster type changed from `parallel::makeCluster()` to 
+  `mirai::make_cluster()`. To switch back to the default use the `control`
+  logical element `use_mirai = FALSE`
+
+- Temp files and other frequently hard-drive written objects 
+  now stored using `qs2` package to reduce overhead (see #83). Relatedly,
+  the function `SimRead()` has been included to read in the stored object,
+  switching between `qs2::qd_read()` and `readRDS()` where applicable
+
+
+## Changes in SimDesign 2.24
+
+- Small modifications to `descript()` for data-analysis purposes, and 
+  selection of `dplyr` verbs exported without attachment (e.g., `group_by()`,
+  `select()`)
+
+- `runSimulation()` implementation can now be augmented with the same 
+  `expandDesign()` logic in `runArraySimulation()`. Requires specifying a single
+  `seed` input, and later passed to `SimCollect(..., simobj)` to aggregate
+  the simulation results across the distributed replication conditions
+
+## Changes in SimDesign 2.23
+
+- Add a `descript()` function for marginal and conditional summary statistics 
+  that work well with `dplyr::group_by()`. Can be used for general data summaries
+  as well
+
+- Added `center` arguments to `bias()`, `RMSD()`, and `MSE()` to change central
+  tendency report (suggested by Michael Truong; #81)
+
+- `SimExtract()` gains a `log_times` element to view the generate/analyse
+  execution times for each independent replication (see issue #80). Relatedly,
+  `runSimulation()` gains `control$logging` element to printing and storing the 
+  logging information
+
+## Changes in SimDesign 2.22
+
+- `runSimulation()` gains a `prepare` function argument for loading or preparing
+  condition-specific objects before replications are executed. This function executes
+  once per simulation condition and is particularly useful for loading pre-computed
+  expensive objects (e.g., correlation matrices, design matrices) from disk in cluster
+  workflows. 
+
+- Added `load_seed_prepare` parameter to `runSimulation()` for debugging the `prepare()`
+  function by reproducing exact RNG states. Works similarly to `load_seed` but specifically
+  for the prepare step. Prepare seeds can be extracted using
+  `SimExtract(res, 'prepare_seeds')` when `store_Random.seeds=TRUE`, and error seeds
+  can be extracted with `SimExtract(res, 'prepare_error_seed')`.
+
+- Progress reporting in non-interactive mode (e.g., SLURM clusters) has been improved.
+  Progress bars now display correctly when running batch jobs on cluster systems,
+  providing better visibility into long-running simulations.
+
+## Changes in SimDesign 2.21
+
+- `createDesign()` gains a `fully.crossed = TRUE` argument. When disabled (`FALSE`) will create a 
+  column-binded object instead of a fully crossed experimental design
+
+- `verbose` flags now check for interactivity instead of simple logical. Provides less verbose
+  output when compiled in, for instance, markdown files
+
+- Maximum number of errors (`max_errors`) reduced to 5 during interactive debugging mode to 
+  slightly avoid delayed browsing
+
+- `Attach(..., Rstudio_flags = TRUE)` now copies the output to the 
+  clipboard for easier insertion into existing code. Only performed 
+  in interative sessions
+
+- Added `not_parallel` argument to `runSimulation()` to avoid using 
+  parallel processing for specific row conditions. Also works within 
+  `runArraySimulation()`
+
+- `runSimulation()` gains a `check.globals` argument roughly check for objects 
+  usage from the global environment
+  
+- Bugfix in `runArraySimulation()` when distributing complied code with parallel 
+  processing (reported by Udi Alter)
+
+## Changes in SimDesign 2.20
+
+- Information provided to `runSimulation(..., packages)` now automatically adds `sessionInfo()$otherPkgs`
+  to the list. This detects and adds any explicit `library()` attachments declared before
+  the simulation execution to be exported
+
+- Add `expandReplications()` function to more naturally match the `expandDesign()`
+  structure
+
+- When `summarise()` returns a `list` this information is now stored in a column
+  `SUMMARISE` in the final simulation object. This replaces the previous
+  `SimExtract()` approach to index the same information
+
+## Changes in SimDesign 2.19.1
+
+- `print.Design()` gains a `show.IDs` flag to show the internally stored condition
+  identifiers. Set to `FALSE` by default
+
+- New notification system in `runSimulation()` contributed by Moritz Ketzer
+
+- `max_time` now behaves more accurately when using multi-core applications 
+  in `runSimulation()` and `runArraySimulation()`
+
+- S3 `rbind.Design()` changed to `rbindDesign` as there was some confusion
+  in the S3 dispatch purpose when internal ID elements needed to be tracked
+  (see #50)
+
+- Multiple parameter `bias()` returned incorrect behavior/errors
+  for `relative` and `abs_relative` types (see #60)
+
+## Changes in SimDesign 2.18
+
+- Objects built by `createDesign()` gain `[]` and `rbind()` S3 functions for 
+  subsetting and combining by rows. Largely included so that internal attributes
+  such as `Design.ID` are better tracked (reported by Michael S. Truong)
+
+- `runArraySimulation(..., max_time)` now correctly applies the maximum 
+  time across all subsetted conditions rather than over each condition, thereby
+  matching, for example, SBATCH commands in SLURM (reported by Michael S. Truong)
+
+- `SimResults()` now gives the same output behavior when `store_results` or 
+  `save_results` are used (see issue #45)
+
+- Use of `SimSolve(..., wait.time)` now automatically sets the `maxiter` to 
+  3000 to avoid early terminations
+
+## Changes in SimDesign 2.17.1
+
+- `runArraySimulation()` now correctly searches in `.GlobalEnv` for user
+  defined functions
+
+- `manageWarnings(... suppress)` argument now allows for partial matching 
+  and other regex inputs
+
+- `SimCollect()` now automatically checks whether all files are expected to 
+  be present via `SimCheck()`
+
+- `runArraySimulation()` gains a `array2row` function to allow array jobs
+  to index multiple conditions in the `design` object (default uses one 
+  `arrayID` per row, the original behaviour)
+
+- `runArraySimulation()` gains `parallel` flag and friends to use multi-core
+  processing within array distributions. RNG numbers within the L'Ecuyer-CMRG
+  algorithm are incremented using `parallel::nextRNGSubStream()` within each 
+  defined core
+
+- Better name checking when using the supported `list` inputs in `runSimulation()`
+  and `runArraySimulation()`
+  
+- `SimCollect()` more efficient when combining a large number of files (e.g.,
+  greater than 5000 `.rds` files stored via `runArraySimulation()`). Gains a 
+  `dir` argument for this purpose as well so that a full directory can be specified
+  
+- `SimCheck()` repurposed to check for missing files for `runArraySimulation()` 
+
+## Changes in SimDesign 2.16
+
+- Fix for `SimCollect()` when `runArraySimulation()` result contains 
+  mixed warning outputs  (reported by Michael S. Truong)
+
+- `manageMessages()` added in a similar spirit to `manageWarnigns()`, though
+  to change messages into either errors or warnings (default behavior is the 
+  same as `quiet()`)
+
+- `manageWarnings()` gains an `suppress` argument to specify explicit 
+  warnings strings that can be suppressed (i.e., are known to be innocuous).
+  This provides better coding practice than the nuclear alternative
+  `base::suppressWarnings()`
+  
+- `convertWarnings()` name changed to `manageWarning()` given its 
+  increased functionality. 
+
+- `timeFormater()` function added to isolate logic of SBATCH time specification
+  utility. Now used in several places of the package (e.g., 
+  `runArraySimulation()`, `PBA()`, `SimSolve()`)
+
+- Switch to camel casing format in all functions (e.g., 
+  `add_missing() -> addMissing()`, `gen_seeds() -> genSeeds()`, etc). Exception
+  is that `aggregate_simulations()` has changed to `SimCollect()`
+  
+- `SimSolve()` gains a `predCI.tol` argument to allow algorithm termination based
+  advertised precision of the estimates
+
+## Changes in SimDesign 2.15.1
+
+- `runSimulation(..., control = list(store_Random.seeds))` logical added to 
+  store all `.Random.seed` replication states. Generally not recommended due 
+  to the size of these stored elements in larger simulations, however can be
+  useful for debugging purposes where errors or warnings are not thrown
+
+- `runArraySimulation()` added to better support distributing array's of jobs
+  on HPC clusters. Works best when combined with new `expandDesign()` 
+  function (see next point) and the improved `aggregate_simulations()` behaviour 
+  for more evenly distribution replication budgets across independent jobs. 
+  An associated vignette file has been added to the package to provide 
+  context and tutorial information for Slurm clusters
+  
+- `expandDesign()` added to repeat the row conditions a number of 
+  times instead of just once. This is useful when
+  exporting each condition independently to computing clusters, where each cluster
+  contains only a fraction of the target `replications` (see issue #33)
+  
+- `getArrayID()` added to detect the array job ID (used 
+  with `runArraySimulation(..., arrayID)`)
+
+- `aggregate_simulations()` now requires explicit `filename` 
+  argument to save the collapsed simulation information
+  
+- `aggregate_simulations()` generalized to detect whether the `Design` conditions
+  have repeated row definitions and therefore should be conditionally averaged
+  over (see new `expandDesign()` function)
+  
+- `runArraySimulation()` and `runSimulation()`'s `control` list gain 
+  new `max_time` and `max_RAM` arguments to evaluate simulation 
+  replications up until this time 
+  or RAM storage constraint is reached. In the event that the target 
+  replications are not reached the simulations up to this point, or the max 
+  RAM storage has been reached, then on the partial results will be returned 
+  (with a warning). This is mainly useful for HPC cluster jobs that require time 
+  and RAM constraints (e.g., 4 days per job; 4GB of RAM), 
+  where some jobs or simulation conditions may be more time/RAM consuming than 
+  others (requested by Mikko Rönkkö)
+  
+- Expose seed generation control per simulation condition via the 
+  function `gen_seeds()`, which also automatically constructs proper 
+  L'Ecuyer-CMRG seeds to be distributed across the `runArraySimulation()` jobs 
+
 ## Changes in SimDesign 2.14
 
 - `SimSolve()` function added to perform (stochastic) root-solving to estimate 
